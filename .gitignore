@@ -1,0 +1,55 @@
+# Secrets
+.env
+scraper.env
+infra/env/*.env
+!infra/env/*.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+chimera.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+package-lock.json
+
+# Runtime artifacts
+storage/results/*
+storage/screenshots/*
+storage/cookies/*
+storage/risk_db.sqlite
+storage/risk_db.sqlite-*
+!storage/*/.gitkeep
+!storage/.gitkeep
+
+# Logs
+logs/*.log
+logs/*.jsonl
+!logs/token_usage.jsonl
+!logs/.gitkeep
+
+# OS / IDE
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Docker volumes
+.docker-data/
+
+# Dev runtime
+.redis.conf
+.redis.pid
+.worker.pid
+.bridge.pid

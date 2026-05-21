@@ -1,0 +1,124 @@
+{
+  "$schema": "./tool_manifest.schema.json",
+  "manifest_version": "0.3.0",
+  "name": "chimera",
+  "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
+  "discovery": {
+    "openapi_url": "/openapi.json",
+    "capabilities_url": "/capabilities",
+    "health_url": "/health"
+  },
+  "auth": {
+    "scheme": "bearer",
+    "header": "Authorization",
+    "env_var": "BRIDGE_AUTH_TOKEN"
+  },
+  "tools": {
+    "probe": {
+      "summary": "Security reconnaissance: TLS cert, headers, cookies, WAF vendors, CSP/HSTS, risk_score. Cameleon SHOULD call this before any /run-tool to choose the right tool and proxy tier.",
+      "implemented_in_step": "2.1",
+      "status": "planned",
+      "endpoint": "GET /probe/{domain}",
+      "params": {}
+    },
+    "scrapy": {
+      "summary": "Fast HTTP scraping for APIs and static HTML. First choice when risk score is low.",
+      "implemented_in_step": "1.4",
+      "status": "available",
+      "endpoint": "POST /run-tool (tool=\"scrapy\")",
+      "params": {
+        "spider": {
+          "type": "string",
+          "enum": ["api_json", "adaptive"],
+          "default": "api_json",
+          "description": "Which built-in spider to run. api_json for JSON APIs (light parsing); adaptive for HTML pages driven by CSS selectors."
+        },
+        "selectors": {
+          "type": "object",
+          "description": "(adaptive only) Map of field_name → CSS selector. Each yielded item carries these fields.",
+          "default": {}
+        },
+        "item_selector": {
+          "type": "string",
+          "description": "(adaptive only, optional) CSS selector that scopes selectors to repeating elements (e.g. li.product). Omit to apply selectors to the whole document."
+        },
+        "headers": {
+          "type": "object",
+          "description": "HTTP headers added to every outgoing request (Cookie, User-Agent, Authorization, etc).",
+          "default": {}
+        },
+        "settings": {
+          "type": "object",
+          "description": "Per-job overrides of Scrapy settings (DOWNLOAD_DELAY, CONCURRENT_REQUESTS, USER_AGENT, ...). Merged on top of tools/scrapy_runner/project/settings.py.",
+          "default": {}
+        },
+        "respect_robots": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to obey robots.txt. Default true; cameleon may flip to false on internal/authorized targets only."
+        },
+        "proxy": {
+          "type": "string",
+          "description": "Proxy URL (http://user:pass@host:port). Informational only at the bridge level — proxy plumbing lands in Session 2."
+        },
+        "session_id": {
+          "type": "string",
+          "description": "Opaque session identifier from cameleon (for cookie persistence across jobs). Informational in Step 1.x."
+        }
+      }
+    },
+    "firecrawl": {
+      "summary": "JS rendering and multi-page crawling via self-hosted Firecrawl + Playwright microservice.",
+      "implemented_in_step": "3.4",
+      "status": "planned",
+      "params": {}
+    },
+    "crawl4ai": {
+      "summary": "Real Chromium/Firefox rendering with LLM-ready markdown output and JsonCssExtractionStrategy.",
+      "implemented_in_step": "3.3",
+      "status": "planned",
+      "params": {}
+    },
+    "screenshot": {
+      "summary": "Ultimate fallback. Returns full-page PNG; OCR/extraction is done by cameleon, not chimera.",
+      "implemented_in_step": "3.2",
+      "status": "planned",
+      "params": {}
+    },
+    "bypass_waf": {
+      "summary": "FlareSolverr wrapper for Cloudflare-class challenges. Used sparingly.",
+      "implemented_in_step": "3.5",
+      "status": "planned",
+      "params": {}
+    }
+  },
+  "proxy_tiers": {
+    "datacenter": { "summary": "Cheap, high throughput. Default for low-risk targets.", "default": true },
+    "residential": { "summary": "Real ISP IPs. Used when risk_score >= 0.5." },
+    "isp_static": { "summary": "Sticky residential — for authenticated sessions." },
+    "mobile": { "summary": "4G mobile carriers. Highest trust, lowest throughput." }
+  },
+  "risk_thresholds": {
+    "ok_max": 0.2,
+    "suspect_max": 0.5,
+    "challenge_max": 0.8,
+    "block_min": 0.8
+  },
+  "escalation_policy": {
+    "0.0-0.2": { "state": "ok", "action": "continue_scrapy" },
+    "0.2-0.5": { "state": "suspect", "action": "slow_down_and_rotate_ua" },
+    "0.5-0.8": { "state": "challenge", "action": "switch_to_crawl4ai_with_residential" },
+    "0.8-1.0": { "state": "block", "action": "screenshot_fallback_and_burn_profile" }
+  },
+  "vendors_detected": ["cloudflare", "akamai", "perimeterx", "datadome", "captcha_generic"],
+  "endpoints": {
+    "POST /run-tool":      "Enqueue a scraping job. Returns {job_id, status}.",
+    "GET  /status/{id}":   "Job lifecycle status (queued|started|finished|failed).",
+    "GET  /result/{id}":   "Structured JSON result for a finished job.",
+    "GET  /download/{id}": "Binary download (PNG) for screenshot jobs.",
+    "GET  /probe/{domain}":"Synchronous reconnaissance probe — recommended before /run-tool. Lands in Step 2.1.",
+    "GET  /risk/{domain}": "Aggregated risk history for a domain.",
+    "GET  /capabilities":  "This manifest, served live.",
+    "GET  /health":        "Liveness probe."
+  }
+}

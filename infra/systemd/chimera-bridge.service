@@ -1,0 +1,31 @@
+[Unit]
+Description=Chimera bridge — FastAPI HTTP API for cameleon
+Documentation=file:/opt/chimera/README.md
+After=network-online.target redis-server.service
+Wants=network-online.target
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=chimera
+Group=chimera
+WorkingDirectory=/opt/chimera
+EnvironmentFile=/etc/chimera/chimera.env
+ExecStart=/opt/chimera/.venv/bin/uvicorn bridge.app:app --host ${BRIDGE_HOST} --port ${BRIDGE_PORT} --workers ${BRIDGE_WORKERS}
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/opt/chimera/logs/bridge.stdout.log
+StandardError=append:/opt/chimera/logs/bridge.stderr.log
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/chimera/logs /opt/chimera/storage
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

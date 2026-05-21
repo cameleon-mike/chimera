@@ -1,0 +1,59 @@
+[project]
+name = "chimera"
+version = "0.1.0"
+description = "Hybrid production scraper — piloted by cameleon as its first tool"
+authors = [{ name = "Mike (SecondPulse)" }]
+requires-python = ">=3.11"
+readme = "README.md"
+
+dependencies = [
+    "scrapy>=2.11",
+    "scrapy-playwright>=0.0.34",
+    "playwright>=1.45",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "httpx[http2]>=0.27",
+    "redis>=5.0",
+    "rq>=1.16",
+    "fake-useragent>=1.5",
+    "crawl4ai>=0.3",
+    "tenacity>=8.2",
+    "structlog>=24.1",
+    "python-dotenv>=1.0",
+    "curl-cffi>=0.7",
+    "prometheus-client>=0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "ipython>=8.20",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# Only treat actual Python source dirs as packages.
+# logs/, storage/, infra/, docs/ are data dirs, not packages.
+include = ["bridge*", "tools*", "network*"]
+exclude = ["logs*", "infra*", "storage*", "docs*", "scripts*", "tests*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
