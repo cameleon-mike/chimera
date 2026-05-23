@@ -94,6 +94,11 @@ else
 fi
 
 bold ""
+bold "[6/5] Fingerprint pool"
+check_required "fingerprint pool valid" \
+  bash -c '"${SCRAPER_HOME}/.venv/bin/python" -m network.fingerprints.validator --dir "${SCRAPER_HOME}/network/fingerprints" >/dev/null 2>&1'
+
+bold ""
 bold "=== Summary ==="
 if [[ $FAILED -eq 0 ]]; then
   green "All required checks passed. ($WARNED optional warnings)"

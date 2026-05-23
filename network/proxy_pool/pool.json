@@ -1,0 +1,15 @@
+{
+  "tiers": {
+    "datacenter": [
+      {"url": "http://dc-mock-1:8000", "country": "US", "active": false, "_mock": true},
+      {"url": "http://dc-mock-2:8000", "country": "FR", "active": false, "_mock": true}
+    ],
+    "residential": [
+      {"url": "http://res-mock-1:8000", "country": "BE", "active": false, "_mock": true},
+      {"url": "http://res-mock-2:8000", "country": "FR", "active": false, "_mock": true}
+    ],
+    "isp": [],
+    "mobile": []
+  },
+  "_note": "Mock entries for dev. Real proxies wired in Session 6 with provider credentials."
+}

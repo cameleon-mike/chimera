@@ -29,9 +29,24 @@ ITEM_PIPELINES = {
 DOWNLOADER_MIDDLEWARES = {
     # Disable Scrapy's stock UA middleware so ours is the only voice.
     "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
+    # RotateUAMiddleware (390) sets the full coherent fingerprint first;
+    # RotateUserAgentMiddleware (400) is a noop when UA is already set.
+    "tools.scrapy_runner.project.middlewares.rotate_ua.RotateUAMiddleware": 390,
     "tools.scrapy_runner.project.middlewares.rotate_ua.RotateUserAgentMiddleware": 400,
+    "tools.scrapy_runner.project.middlewares.rotate_proxy.RotateProxyMiddleware": 410,
     "tools.scrapy_runner.project.middlewares.human_delay.HumanDelayMiddleware": 543,
+    "tools.scrapy_runner.project.middlewares.risk_signals.RiskMiddleware": 900,
 }
+
+RISK_THRESHOLD_WARN = 0.5
+RISK_THRESHOLD_BLOCK = 0.8
+
+# --- Session persistence (Step 2.4) ----------------------------------
+# Set SESSION_REDIS_URL to activate sticky UA+proxy per session_id.
+# Leave None to disable — middlewares fall back to per-request random selection.
+SESSION_REDIS_URL = None
+SESSION_TTL = 1800  # seconds; Redis key expiry
+SESSION_ID = None
 
 # --- Robustness ------------------------------------------------------
 RETRY_ENABLED = True

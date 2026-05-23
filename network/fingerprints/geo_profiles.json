@@ -1,0 +1,44 @@
+{
+  "fr-paris": {
+    "timezone": "Europe/Paris",
+    "locale": "fr-FR",
+    "accept_language": "fr-FR,fr;q=0.9,en;q=0.8",
+    "proxy_country": "FR",
+    "compatible_ua_profiles": ["chrome127-win", "firefox128-mac", "safari17-mac"]
+  },
+  "be-brussels": {
+    "timezone": "Europe/Brussels",
+    "locale": "fr-BE",
+    "accept_language": "fr-BE,fr;q=0.9,en;q=0.8,nl;q=0.7",
+    "proxy_country": "BE",
+    "compatible_ua_profiles": ["chrome127-win", "chrome127-mac", "firefox128-win"]
+  },
+  "us-east": {
+    "timezone": "America/New_York",
+    "locale": "en-US",
+    "accept_language": "en-US,en;q=0.9",
+    "proxy_country": "US",
+    "compatible_ua_profiles": ["chrome127-win", "chrome127-mac", "safari17-mac", "edge127-win"]
+  },
+  "us-west": {
+    "timezone": "America/Los_Angeles",
+    "locale": "en-US",
+    "accept_language": "en-US,en;q=0.9",
+    "proxy_country": "US",
+    "compatible_ua_profiles": ["chrome127-mac", "safari17-mac"]
+  },
+  "de-berlin": {
+    "timezone": "Europe/Berlin",
+    "locale": "de-DE",
+    "accept_language": "de-DE,de;q=0.9,en;q=0.8",
+    "proxy_country": "DE",
+    "compatible_ua_profiles": ["chrome127-win", "firefox128-win", "edge127-win"]
+  },
+  "uk-london": {
+    "timezone": "Europe/London",
+    "locale": "en-GB",
+    "accept_language": "en-GB,en;q=0.9",
+    "proxy_country": "UK",
+    "compatible_ua_profiles": ["chrome127-win", "chrome127-mac", "edge127-win"]
+  }
+}

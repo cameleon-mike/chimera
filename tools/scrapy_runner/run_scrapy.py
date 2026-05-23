@@ -17,7 +17,7 @@ Input JSON (matches the bridge's RunToolRequest.config payload):
         "settings":       {"DOWNLOAD_DELAY": 0.5, ...},# scrapy overrides
         "respect_robots": true,                         # default true
         "proxy":          "http://user:pass@host:port", # informational
-        "session_id":     "sess_xyz"                    # informational
+        "session_id":     "sess_xyz"                    # sticky UA+proxy via SessionManager (Step 2.4)
     },
     "job_id": "<16-hex>"                # optional; generated if absent
 }
@@ -56,6 +56,7 @@ import asyncio  # noqa: F401 — imported to ensure event loop exists before Scr
 import json
 import logging
 import secrets
+import sqlite3
 import sys
 import time
 from datetime import UTC, datetime
@@ -78,6 +79,26 @@ _JOB_ID_RE = re.compile(r"^[a-f0-9]{1,64}$")
 _SPIDERS = {
     "api_json": ApiJsonSpider,
     "adaptive": AdaptiveSpider,
+}
+
+_SCRAPY_SETTINGS_WHITELIST = {
+    "DOWNLOAD_DELAY",
+    "CONCURRENT_REQUESTS",
+    "CONCURRENT_REQUESTS_PER_DOMAIN",
+    "AUTOTHROTTLE_TARGET_CONCURRENCY",
+    "ROBOTSTXT_OBEY",
+    "USER_AGENT",
+    "DEFAULT_REQUEST_HEADERS",
+    "RETRY_TIMES",
+    "DOWNLOAD_TIMEOUT",
+    "PROXY_TIER",
+    "FINGERPRINTS_DIR",
+    "GEO_ID",
+    "RISK_THRESHOLD_WARN",
+    "RISK_THRESHOLD_BLOCK",
+    "SESSION_REDIS_URL",
+    "SESSION_TTL",
+    "SESSION_ID",
 }
 
 
@@ -146,10 +167,88 @@ def _build_settings(config: dict[str, Any]) -> Any:
     if "respect_robots" in config:
         settings.set("ROBOTSTXT_OBEY", bool(config["respect_robots"]), priority="cmdline")
 
+    if config.get("session_id"):
+        settings.set("SESSION_ID", config["session_id"], priority="cmdline")
+
+    _log = logging.getLogger("scrapy_runner")
     for key, value in (config.get("settings") or {}).items():
+        if key not in _SCRAPY_SETTINGS_WHITELIST:
+            _log.warning(
+                "settings_key_rejected: %s (not in whitelist)", key
+            )
+            continue
         settings.set(key, value, priority="cmdline")
 
     return settings
+
+
+_RISK_DB_PATH = Path(__file__).parents[2] / "storage" / "risk_db.sqlite"
+
+
+def _get_job_scores(job_id: str) -> list[tuple[float, str]]:
+    """Return list of (risk_score, vendors_json) rows for a job_id from SQLite."""
+    try:
+        conn = sqlite3.connect(str(_RISK_DB_PATH))
+        try:
+            cur = conn.execute(
+                "SELECT risk_score, vendors_json FROM risk_events WHERE job_id = ?",
+                (job_id,),
+            )
+            return cur.fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return []
+
+
+def _build_escalation(job_id: str, urls: list[str]) -> dict:
+    """Query risk_events for this job and compute escalation hint."""
+    rows = _get_job_scores(job_id)
+
+    if not rows:
+        return {
+            "needed": False,
+            "reason": "no_risk_data",
+            "suggested_tool": None,
+            "vendors_detected": [],
+            "trigger_threshold": 0.5,
+        }
+
+    scores = [r[0] for r in rows]
+    all_vendors: set[str] = set()
+    for _, vj in rows:
+        try:
+            all_vendors.update(json.loads(vj or "[]"))
+        except Exception:
+            pass
+
+    avg_risk = sum(scores) / len(scores)
+    max_risk = max(scores)
+    high_risk_count = sum(1 for s in scores if s >= 0.5)
+    # trigger_min_responses=3 applies to the percentage check only;
+    # a single response with max_risk >= 0.8 always escalates.
+    pct_trigger = len(scores) >= 3 and (high_risk_count / len(scores) >= 0.5)
+    needed = pct_trigger or (max_risk >= 0.8) or (avg_risk >= 0.5)
+
+    if avg_risk >= 0.8 or max_risk == 1.0:
+        suggested_tool = "screenshot"
+    elif needed:
+        suggested_tool = "crawl4ai"
+    else:
+        suggested_tool = None
+
+    reason = (
+        f"risk_score {max_risk:.2f} on {high_risk_count} of {len(scores)} requests"
+        if needed else f"avg_risk {avg_risk:.2f} below threshold"
+    )
+
+    return {
+        "needed": needed,
+        "reason": reason,
+        "suggested_tool": suggested_tool,
+        "vendors_detected": sorted(all_vendors),
+        "trigger_threshold": 0.5,
+    }
 
 
 def _persist_result(job_id: str, payload: dict[str, Any]) -> Path:
@@ -178,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     spider_kwargs: dict[str, Any] = {
         "urls": urls,
         "headers": config.get("headers") or {},
+        "job_id": job_id,
     }
     if spider_name == "adaptive":
         spider_kwargs["selectors"] = config.get("selectors") or {}
@@ -199,12 +299,15 @@ def main(argv: list[str] | None = None) -> int:
     duration_ms = int((time.perf_counter() - t0) * 1000)
     finished_at = _iso_now()
 
+    job_scores = _get_job_scores(job_id)
+    scores = [r[0] for r in job_scores]
+
     result = {
         "tool": "scrapy",
         "url": payload["url"],  # echo exactly what was sent in
         "http_status": final_status,
         "proxy": config.get("proxy"),
-        "risk_score": 0.10,  # placeholder — real scoring lands in Step 2.3
+        "risk_score": max(scores) if scores else 0.0,
         "items": items,
         "_meta": {
             "spider": spider_name,
@@ -214,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
             "duration_ms": duration_ms,
             "item_count": len(items),
         },
+        "_escalation": _build_escalation(job_id, urls),
     }
 
     out_path = _persist_result(job_id, result)

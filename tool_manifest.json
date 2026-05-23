@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.3.0",
+  "manifest_version": "0.6.0",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -17,9 +17,21 @@
     "probe": {
       "summary": "Security reconnaissance: TLS cert, headers, cookies, WAF vendors, CSP/HSTS, risk_score. Cameleon SHOULD call this before any /run-tool to choose the right tool and proxy tier.",
       "implemented_in_step": "2.1",
-      "status": "planned",
+      "status": "available",
       "endpoint": "GET /probe/{domain}",
-      "params": {}
+      "synchronous": true,
+      "params": {
+        "domain": {
+          "type": "string",
+          "description": "FQDN to probe (e.g. 'ebay.com'). Required.",
+          "required": true
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Bypass 24h cache and force a fresh probe.",
+          "default": false
+        }
+      }
     },
     "scrapy": {
       "summary": "Fast HTTP scraping for APIs and static HTML. First choice when risk score is low.",
@@ -63,7 +75,7 @@
         },
         "session_id": {
           "type": "string",
-          "description": "Opaque session identifier from cameleon (for cookie persistence across jobs). Informational in Step 1.x."
+          "description": "Session identifier: requests sharing the same session_id reuse the same fingerprint profile and proxy (sticky UA+proxy via SessionManager Redis). TTL 30 min. Functional as of Step 2.4."
         }
       }
     },
@@ -105,10 +117,23 @@
     "block_min": 0.8
   },
   "escalation_policy": {
-    "0.0-0.2": { "state": "ok", "action": "continue_scrapy" },
-    "0.2-0.5": { "state": "suspect", "action": "slow_down_and_rotate_ua" },
-    "0.5-0.8": { "state": "challenge", "action": "switch_to_crawl4ai_with_residential" },
-    "0.8-1.0": { "state": "block", "action": "screenshot_fallback_and_burn_profile" }
+    "thresholds": {
+      "ok_max":        0.2,
+      "warn_max":      0.5,
+      "challenge_max": 0.8,
+      "block_min":     0.8
+    },
+    "actions": {
+      "ok":        { "tool": "scrapy",      "proxy_tier": "datacenter" },
+      "warn":      { "tool": "scrapy",      "proxy_tier": "residential", "delay_multiplier": 2.0 },
+      "challenge": { "tool": "crawl4ai",   "proxy_tier": "residential" },
+      "block":     { "tool": "screenshot", "proxy_tier": "residential", "burn_profile": true }
+    },
+    "runtime_escalation": {
+      "trigger_min_responses": 3,
+      "trigger_avg_risk":      0.5,
+      "trigger_max_risk":      0.8
+    }
   },
   "vendors_detected": ["cloudflare", "akamai", "perimeterx", "datadome", "captcha_generic"],
   "endpoints": {

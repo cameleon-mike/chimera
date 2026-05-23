@@ -221,6 +221,24 @@ def dispatch_job(
 
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     save_result(job_id, result)
+    _escalation = result.get("_escalation") or {}
+    if _escalation.get("needed"):
+        write_audit({
+            "ts": _iso_now(),
+            "event": "escalation_triggered",
+            "job_id": job_id,
+            "tool": tool,
+            "suggested_tool": _escalation.get("suggested_tool"),
+            "vendors_detected": _escalation.get("vendors_detected", []),
+            "reason": _escalation.get("reason"),
+        })
+        logger.warning(
+            "escalation_triggered",
+            job_id=job_id,
+            current_tool=tool,
+            suggested_tool=_escalation.get("suggested_tool"),
+            reason=_escalation.get("reason"),
+        )
     result_blob = json.dumps(result, separators=(",", ":"))
 
     write_audit({

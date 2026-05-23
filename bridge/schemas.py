@@ -100,5 +100,48 @@ class HealthResponse(BaseModel):
 
 class RiskResponse(BaseModel):
     domain: str
-    last_24h: dict[str, Any] = Field(default_factory=dict)
+    window_hours: int = 24
+    requests: int = 0
+    blocks: int = 0
+    captchas: int = 0
+    avg_risk: float = 0.0
+    max_risk: float = 0.0
+    vendors_seen: list[str] = Field(default_factory=list)
     recommendation: str | None = None
+
+
+class ProbeRecommendation(BaseModel):
+    tool: str
+    proxy_tier: str
+    fingerprint: str
+
+
+class ProbeResponse(BaseModel):
+    domain: str
+    probed_at: str
+    risk_score: float
+    vendors_detected: list[str]
+    tls: dict[str, Any]
+    features: dict[str, Any]
+    indicators: dict[str, int]
+    http_status: int
+    recommendation: ProbeRecommendation
+    cached: bool = False
+
+
+class EscalateRequest(BaseModel):
+    job_id: str = Field(..., description="Job ID to evaluate for escalation.")
+    domain: str | None = Field(default=None, description="Domain being scraped (informational).")
+    urls: list[str] | None = Field(default=None, description="URLs scraped (informational).")
+
+
+class EscalateResponse(BaseModel):
+    job_id: str
+    needed: bool
+    reason: str
+    suggested_tool: str | None
+    vendors_detected: list[str]
+    trigger_threshold: float
+    avg_risk: float
+    max_risk: float
+    response_count: int
