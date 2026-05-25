@@ -15,6 +15,7 @@ class ProxyRotator:
         self._proxies = [
             p for p in tiers.get(tier, []) if p.get("active")
         ]
+        self._tier = tier
         self._idx = 0
 
         db_path = pool_file.parent.parent.parent / "storage" / "risk_db.sqlite"
@@ -40,6 +41,17 @@ class ProxyRotator:
         for attempt in range(n):
             candidate_idx = (self._idx + attempt) % n
             candidate = self._proxies[candidate_idx]
+
+            if candidate.get("provider") == "brightdata":
+                from network.proxy_pool.brightdata import build_proxy_url
+                url = build_proxy_url(
+                    country=candidate.get("country"),
+                    tier=self._tier,
+                )
+                if not url:
+                    return None  # credentials not configured → no Bright Data
+                candidate = {**candidate, "url": url}
+
             proxy_url = candidate["url"]
 
             cur = self._db.execute(

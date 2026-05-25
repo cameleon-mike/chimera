@@ -87,6 +87,26 @@ below before cameleon may request them.
 
 ---
 
+## 7b. FlareSolverr — usage constraints
+
+FlareSolverr est utilisé **uniquement comme dernier recours** (risk_score ≥ 0.8,
+escalade tier 4). Les contraintes suivantes s'appliquent :
+
+- **Domaines autorisés uniquement** : seuls les domaines listés en section 4
+  (Domain allowlist) peuvent être ciblés avec `bypass_waf`.
+- **Contenu public uniquement** : ne jamais utiliser pour contourner des protections
+  d'accès authentifié, des paywalls ou des systèmes de paiement.
+- **Rate-limit volontaire** : un délai minimum de 30 secondes entre deux appels
+  `bypass_waf` sur le même domaine est fortement recommandé.
+- **Logs** : chaque utilisation de `bypass_waf` est tracée dans `audit.jsonl` avec
+  `tool=bypass_waf`, `job_id` et URL. Ces logs sont conservés indéfiniment.
+- **Turnstile / hCaptcha** : FlareSolverr résout les JS challenges Cloudflare mais
+  **pas** les CAPTCHA visuels Turnstile ou hCaptcha sans solveur tiers configuré
+  (`CAPTCHA_SOLVER=none` dans docker-compose). Ne pas promettre une résolution
+  systématique.
+
+---
+
 ## 8. Incident response
 
 If Chimera triggers a rate-limit, IP ban, or legal notice from a target site:

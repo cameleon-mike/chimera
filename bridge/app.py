@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 
 from . import __version__, manifest as mf
 from .auth import require_bearer
@@ -23,10 +24,14 @@ from .config import get_settings
 from .logging_setup import setup_logging, write_audit
 from . import queue as q
 from .schemas import (
+    DailyRunResponse,
     EscalateRequest,
     EscalateResponse,
+    FactoryStatsResponse,
     HealthResponse,
     JobStatus,
+    ProfileCreateRequest,
+    ProfileResponse,
     ProbeResponse,
     ResultResponse,
     RiskResponse,
@@ -84,6 +89,23 @@ def _init_risk_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_risk_events_domain ON risk_events(domain);
             CREATE INDEX IF NOT EXISTS idx_risk_events_ts ON risk_events(ts);
             CREATE INDEX IF NOT EXISTS idx_risk_events_job ON risk_events(job_id);
+            CREATE TABLE IF NOT EXISTS profiles (
+                profile_id          TEXT PRIMARY KEY,
+                geo_id              TEXT NOT NULL DEFAULT 'fr-paris',
+                proxy_country       TEXT NOT NULL DEFAULT 'FR',
+                ua_profile_id       TEXT NOT NULL DEFAULT 'chrome127-win',
+                status              TEXT DEFAULT 'created',
+                age_days            INTEGER DEFAULT 0,
+                created_at          TEXT,
+                last_active         TEXT,
+                last_used           TEXT,
+                warmed              INTEGER DEFAULT 0,
+                cookies_count       INTEGER DEFAULT 0,
+                extensions_json     TEXT DEFAULT '[]',
+                linked_account_json TEXT DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_profiles_status ON profiles(status);
+            CREATE INDEX IF NOT EXISTS idx_profiles_country ON profiles(proxy_country);
         """)
         conn.commit()
     finally:
@@ -91,6 +113,8 @@ def _init_risk_db() -> None:
 
 
 _init_risk_db()
+
+from bridge.scheduler import setup_scheduler  # noqa: E402
 
 app = FastAPI(
     title="Chimera",
@@ -104,6 +128,8 @@ app = FastAPI(
     redoc_url="/redoc" if settings.docs_enabled else None,
     openapi_url="/openapi.json" if settings.docs_enabled else None,
 )
+
+setup_scheduler(app, settings)
 
 
 # --- Request logging middleware --------------------------------------
@@ -497,5 +523,119 @@ async def download_artifact(
     job_id: str,
     _token: Annotated[str, Depends(require_bearer)],
 ):
-    """Binary download (PNG) for screenshot jobs. Lands in Step 3.2."""
-    raise HTTPException(status_code=501, detail="not implemented yet (lands in Step 3.2)")
+    """Binary download (PNG) for screenshot jobs."""
+    png_path = settings.screenshots_dir / f"{job_id}.png"
+    if not png_path.exists():
+        raise HTTPException(status_code=404, detail="screenshot not found")
+    return FileResponse(
+        path=str(png_path),
+        media_type="image/png",
+        filename=f"{job_id}.png",
+    )
+
+
+# --- Profile factory endpoints -----------------------------------------------
+
+
+def _get_factory():
+    """Instantiate AccountFactory bound to the global risk_db and cookies_dir."""
+    from tools.account_factory.factory import AccountFactory
+    return AccountFactory(
+        db_path=settings.risk_db_path,
+        profiles_dir=settings.cookies_dir,
+        settings=settings,
+    )
+
+
+@app.get("/factory/profiles", tags=["factory"])
+async def list_factory_profiles(
+    status: str | None = None,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+):
+    """List all registered browser profiles, optionally filtered by status."""
+    factory = _get_factory()
+    profiles = factory.list_all_profiles()
+    if status:
+        profiles = [p for p in profiles if p.get("status") == status]
+    return {"profiles": profiles}
+
+
+@app.get("/factory/profiles/{profile_id}", tags=["factory"])
+async def get_factory_profile(
+    profile_id: str,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+):
+    """Retrieve a single profile by ID."""
+    factory = _get_factory()
+    profile = factory._get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="profile not found")
+    return profile
+
+
+@app.post("/factory/create", tags=["factory"])
+async def create_factory_profiles(
+    body: ProfileCreateRequest,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+):
+    """Create N profiles with status=creating."""
+    from tools.account_factory.profile_config import ProfileConfig
+    factory = _get_factory()
+    created = []
+    for _ in range(body.count):
+        config = ProfileConfig(
+            geo_id=body.geo_id,
+            proxy_country=body.proxy_country,
+            ua_profile_id=body.ua_profile_id,
+        )
+        pid = factory.create_profile(config)
+        created.append(pid)
+    return {"created": created, "count": len(created)}
+
+
+@app.post("/factory/warm/{profile_id}", tags=["factory"])
+async def warm_factory_profile(
+    profile_id: str,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+):
+    """Launch the warm-up sequence for a profile (10–15 min, runs inline)."""
+    factory = _get_factory()
+    result = await factory.run_warm_up(profile_id)
+    return result
+
+
+@app.post("/factory/run-daily", tags=["factory"])
+async def run_daily_factory(
+    body: dict = {},
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+):
+    """Trigger the full daily factory orchestration (create + warm + age)."""
+    factory = _get_factory()
+    new_count = body.get("new_profiles_count", settings.factory_new_profiles_per_day)
+    report = await factory.daily_factory_run(new_profiles_count=new_count)
+    return report
+
+
+@app.get("/factory/stats", tags=["factory"])
+async def factory_stats(
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+):
+    """Return profile counts by status."""
+    factory = _get_factory()
+    return factory.get_stats()
+
+
+@app.get("/factory/recommend", tags=["factory"])
+async def recommend_factory_profile(
+    domain: str,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+):
+    """Return the best warmed profile for a domain (geo-coherent, highest age)."""
+    _valid, _reason = validate_fqdn(domain)
+    if not _valid:
+        raise HTTPException(status_code=422, detail=_reason)
+    factory = _get_factory()
+    profile = factory.get_best_for_domain(domain)
+    if not profile:
+        raise HTTPException(status_code=404, detail="no ready profile found")
+    return profile

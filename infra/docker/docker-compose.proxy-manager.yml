@@ -1,0 +1,10 @@
+services:
+  brd-pm:
+    image: luminati/luminati-proxy
+    command: luminati --port 24000 --www 22999
+    ports:
+      - "24000:24000"
+      - "22999:22999"
+    restart: unless-stopped
+    volumes:
+      - ../../storage/proxy_manager:/root/proxy_manager

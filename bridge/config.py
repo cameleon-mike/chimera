@@ -67,6 +67,36 @@ class Settings(BaseSettings):
     cookies_dir: Path = Field(default=Path("storage/cookies"))
     risk_db_path: Path = Field(default=Path("storage/risk_db.sqlite"))
 
+    # --- Firecrawl (self-hosted, Step 3.4) ----------------------------
+    firecrawl_url: str = Field(
+        default="http://127.0.0.1:3002",
+        description="Base URL of the self-hosted Firecrawl API.",
+    )
+    firecrawl_api_key: str = Field(
+        default="chimera-local",
+        description=(
+            "Bearer API key for Firecrawl. Must match TEST_API_KEY in docker-compose.firecrawl.yml "
+            "when USE_DB_AUTHENTICATION=false."
+        ),
+    )
+
+    # --- FlareSolverr (Step 3.5) ------------------------------------------
+    flaresolverr_url: str = Field(
+        default="http://127.0.0.1:8191/v1",
+        description="FlareSolverr API endpoint",
+    )
+
+    # --- Bright Data --------------------------------------------------
+    brightdata_username: str = Field(default="", description="Bright Data proxy username")
+    brightdata_password: str = Field(default="", description="Bright Data proxy password")
+    brightdata_host: str = Field(default="brd.superproxy.io")
+    brightdata_port: int = Field(default=33335, description="Residential/datacenter proxy port")
+
+    # --- Account Factory ------------------------------------------------------
+    factory_cron_enabled: bool = Field(default=False, description="Enable APScheduler daily_factory cron.")
+    factory_new_profiles_per_day: int = Field(default=2, description="New profiles created per daily run.")
+    factory_profiles_dir: str = Field(default="storage/cookies", description="Profile directory (overrides cookies_dir for factory if set).")
+
     # --- Risk thresholds (mirror tool_manifest.json) ------------------
     risk_ok_max: float = 0.2
     risk_suspect_max: float = 0.5

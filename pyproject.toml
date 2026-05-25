@@ -24,6 +24,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "curl-cffi>=0.7",
     "prometheus-client>=0.20",
+    "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]

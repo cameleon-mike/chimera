@@ -1,0 +1,91 @@
+# =====================================================================
+# Chimera — Firecrawl self-hosted stack
+#
+# Start:   docker compose -f infra/docker/docker-compose.firecrawl.yml up -d
+# Stop:    docker compose -f infra/docker/docker-compose.firecrawl.yml down
+# Logs:    docker compose -f infra/docker/docker-compose.firecrawl.yml logs -f api
+#
+# API exposed on host port 3002 (configurable via FIRECRAWL_PORT).
+# Uses its own Redis on host port 6381 — no conflict with chimera's Redis (6379).
+# =====================================================================
+
+services:
+
+  playwright-service:
+    image: ghcr.io/mendableai/playwright-service:latest
+    environment:
+      PORT: "3000"
+    restart: unless-stopped
+    networks:
+      - firecrawl-net
+
+  api:
+    image: ghcr.io/mendableai/firecrawl:latest
+    environment:
+      PORT: "3002"
+      HOST: "0.0.0.0"
+      REDIS_URL: "redis://redis:6379"
+      REDIS_RATE_LIMIT_URL: "redis://redis:6379"
+      PLAYWRIGHT_MICROSERVICE_URL: "http://playwright-service:3000"
+      # Disable Supabase auth — self-hosted local mode.
+      USE_DB_AUTHENTICATION: "false"
+      # Any API key chimera sends will be accepted when USE_DB_AUTHENTICATION=false.
+      # Keep this in sync with FIRECRAWL_API_KEY in scraper.env.
+      TEST_API_KEY: "${FIRECRAWL_API_KEY:-chimera-local}"
+      # Unused external service keys — required by firecrawl at startup.
+      SCRAPING_BEE_API_KEY: ""
+      OPENAI_API_KEY: "unused"
+      BULL_AUTH_KEY: "@"
+    ports:
+      - "${FIRECRAWL_PORT:-3002}:3002"
+    depends_on:
+      redis:
+        condition: service_healthy
+      playwright-service:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - firecrawl-net
+
+  worker:
+    image: ghcr.io/mendableai/firecrawl:latest
+    entrypoint: ["node", "dist/src/services/queue-worker.js"]
+    environment:
+      REDIS_URL: "redis://redis:6379"
+      REDIS_RATE_LIMIT_URL: "redis://redis:6379"
+      PLAYWRIGHT_MICROSERVICE_URL: "http://playwright-service:3000"
+      USE_DB_AUTHENTICATION: "false"
+      SCRAPING_BEE_API_KEY: ""
+      OPENAI_API_KEY: "unused"
+      BULL_AUTH_KEY: "@"
+    depends_on:
+      redis:
+        condition: service_healthy
+      playwright-service:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - firecrawl-net
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # Port 6381 on host — avoids conflict with chimera's Redis on 6379.
+    ports:
+      - "6381:6379"
+    volumes:
+      - firecrawl_redis_data:/data
+    restart: unless-stopped
+    networks:
+      - firecrawl-net
+
+volumes:
+  firecrawl_redis_data:
+
+networks:
+  firecrawl-net:
+    driver: bridge

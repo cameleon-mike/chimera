@@ -1,15 +1,22 @@
 {
   "tiers": {
     "datacenter": [
-      {"url": "http://dc-mock-1:8000", "country": "US", "active": false, "_mock": true},
-      {"url": "http://dc-mock-2:8000", "country": "FR", "active": false, "_mock": true}
+      {"id": "bd-dc-be", "provider": "brightdata", "country": "BE",
+       "active": true, "_note": "credentials from BRIGHTDATA_* env vars"},
+      {"id": "bd-dc-de", "provider": "brightdata", "country": "DE", "active": true},
+      {"id": "bd-dc-fr", "provider": "brightdata", "country": "FR", "active": true}
     ],
     "residential": [
-      {"url": "http://res-mock-1:8000", "country": "BE", "active": false, "_mock": true},
-      {"url": "http://res-mock-2:8000", "country": "FR", "active": false, "_mock": true}
+      {"id": "bd-res-be", "provider": "brightdata", "country": "BE", "active": true},
+      {"id": "bd-res-de", "provider": "brightdata", "country": "DE", "active": true},
+      {"id": "bd-res-fr", "provider": "brightdata", "country": "FR", "active": true},
+      {"id": "bd-res-gb", "provider": "brightdata", "country": "GB", "active": true},
+      {"id": "bd-res-nl", "provider": "brightdata", "country": "NL", "active": true}
     ],
     "isp": [],
     "mobile": []
   },
-  "_note": "Mock entries for dev. Real proxies wired in Session 6 with provider credentials."
+  "_provider_docs": {
+    "brightdata": "https://docs.brightdata.com/proxy-networks/residential"
+  }
 }

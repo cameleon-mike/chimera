@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.6.0",
+  "manifest_version": "0.7.1",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -82,27 +82,239 @@
     "firecrawl": {
       "summary": "JS rendering and multi-page crawling via self-hosted Firecrawl + Playwright microservice.",
       "implemented_in_step": "3.4",
-      "status": "planned",
-      "params": {}
+      "status": "available",
+      "endpoint": "POST /run-tool (tool=\"firecrawl\")",
+      "params": {
+        "mode": {
+          "type": "string",
+          "enum": ["scrape", "crawl"],
+          "default": "scrape",
+          "description": "scrape = single URL (synchronous); crawl = follow links up to max_pages (async poll)."
+        },
+        "formats": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["markdown", "html", "rawHtml", "links"] },
+          "default": ["markdown"],
+          "description": "Output formats to request from Firecrawl. markdown is the primary LLM-ready format."
+        },
+        "only_main_content": {
+          "type": "boolean",
+          "default": true,
+          "description": "Strip nav, footer, sidebar boilerplate — keeps only the main page content."
+        },
+        "wait_ms": {
+          "type": "integer",
+          "default": 0,
+          "description": "Extra wait in milliseconds before page capture (for JS-heavy SPAs)."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "default": 30000,
+          "description": "HTTP request timeout to the Firecrawl API in milliseconds."
+        },
+        "max_pages": {
+          "type": "integer",
+          "default": 10,
+          "description": "(crawl mode) Maximum pages to crawl."
+        },
+        "max_depth": {
+          "type": "integer",
+          "default": 2,
+          "description": "(crawl mode) Maximum link depth from the seed URL."
+        },
+        "poll_timeout_s": {
+          "type": "integer",
+          "default": 120,
+          "description": "(crawl mode) Maximum seconds to poll for crawl job completion."
+        },
+        "mobile": {
+          "type": "boolean",
+          "default": false,
+          "description": "Emulate a mobile viewport."
+        },
+        "headers": {
+          "type": "object",
+          "default": {},
+          "description": "Extra HTTP headers sent to the target page (Cookie, Authorization, etc)."
+        },
+        "proxy": {
+          "type": "string",
+          "default": null,
+          "description": "Proxy URL — stored in result for traceability; proxy routing is managed at the stack level."
+        }
+      }
     },
     "crawl4ai": {
-      "summary": "Real Chromium/Firefox rendering with LLM-ready markdown output and JsonCssExtractionStrategy.",
+      "summary": "Real Chromium rendering with LLM-ready markdown output or JsonCssExtractionStrategy. Preferred escalation target when risk_score ≥ 0.5.",
       "implemented_in_step": "3.3",
-      "status": "planned",
-      "params": {}
+      "status": "available",
+      "endpoint": "POST /run-tool (tool=\"crawl4ai\")",
+      "params": {
+        "schema": {
+          "type": "object",
+          "description": "JsonCssExtractionStrategy schema — {name, baseSelector, fields:[{name,selector,type,attribute?}]}. If omitted, returns raw markdown.",
+          "default": null
+        },
+        "css_selector": {
+          "type": "string",
+          "description": "Scope extraction/markdown to a CSS selector on the page (e.g. 'main', '#content').",
+          "default": null
+        },
+        "headless": {
+          "type": "boolean",
+          "default": true
+        },
+        "proxy": {
+          "type": "string",
+          "description": "Proxy URL (http://user:pass@host:port). Set by the bridge from the proxy pool when cameleon omits it.",
+          "default": null
+        },
+        "locale": {
+          "type": "string",
+          "description": "Browser locale string (fr-FR, en-US, ...).",
+          "default": "fr-FR"
+        },
+        "tz": {
+          "type": "string",
+          "description": "Browser timezone ID.",
+          "default": "Europe/Paris"
+        },
+        "ua": {
+          "type": "string",
+          "description": "User-Agent override. If omitted, crawl4ai selects a realistic UA.",
+          "default": null
+        },
+        "page_timeout": {
+          "type": "integer",
+          "description": "Navigation timeout in milliseconds.",
+          "default": 30000
+        },
+        "wait_ms": {
+          "type": "integer",
+          "description": "Extra delay before HTML capture in milliseconds.",
+          "default": 0
+        },
+        "simulate_user": {
+          "type": "boolean",
+          "description": "Enable human-like interactions (scroll, mouse movements).",
+          "default": true
+        },
+        "word_count_threshold": {
+          "type": "integer",
+          "description": "Minimum word count per block kept in markdown output.",
+          "default": 0
+        },
+        "cache_mode": {
+          "type": "string",
+          "enum": ["bypass", "enabled", "disabled", "read_only", "write_only"],
+          "description": "Crawl4AI cache policy. Use 'bypass' in production to avoid stale content.",
+          "default": "bypass"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "Session identifier: same session_id reuses the same fingerprint and proxy (sticky via SessionManager Redis). TTL 30 min.",
+          "default": null
+        }
+      }
     },
     "screenshot": {
       "summary": "Ultimate fallback. Returns full-page PNG; OCR/extraction is done by cameleon, not chimera.",
       "implemented_in_step": "3.2",
-      "status": "planned",
-      "params": {}
+      "status": "available",
+      "endpoint": "POST /run-tool (tool=\"screenshot\")",
+      "params": {
+        "url": {
+          "type": "string",
+          "description": "Target URL to screenshot.",
+          "required": true
+        },
+        "profile_id": {
+          "type": "string",
+          "description": "Browser profile directory under storage/cookies. Persistent across calls.",
+          "default": "default"
+        },
+        "proxy_country": {
+          "type": "string",
+          "description": "ISO 2-letter country code for Bright Data residential proxy (BE/FR/DE/GB/NL). No proxy if omitted.",
+          "default": null
+        },
+        "proxy_tier": {
+          "type": "string",
+          "enum": ["residential", "datacenter"],
+          "default": "residential"
+        },
+        "locale": {
+          "type": "string",
+          "description": "Browser locale string.",
+          "default": "fr-FR"
+        },
+        "tz": {
+          "type": "string",
+          "description": "Browser timezone ID.",
+          "default": "Europe/Paris"
+        },
+        "headless": {
+          "type": "boolean",
+          "default": true
+        },
+        "wait_until": {
+          "type": "string",
+          "enum": ["networkidle", "domcontentloaded"],
+          "default": "networkidle"
+        },
+        "wait_ms": {
+          "type": "integer",
+          "description": "Extra wait after page load in milliseconds.",
+          "default": 0
+        },
+        "full_page": {
+          "type": "boolean",
+          "description": "Capture full scrollable page.",
+          "default": true
+        }
+      }
     },
     "bypass_waf": {
-      "summary": "FlareSolverr wrapper for Cloudflare-class challenges. Used sparingly.",
+      "summary": "FlareSolverr wrapper for Cloudflare JS challenge and Turnstile. Last-resort escalation (risk_score >= 0.8). Requires chimera-flaresolverr Docker container.",
       "implemented_in_step": "3.5",
-      "status": "planned",
-      "params": {}
+      "status": "available",
+      "endpoint": "POST /run-tool (tool=\"bypass_waf\")",
+      "params": {
+        "url": {
+          "type": "string",
+          "description": "Target URL to bypass. Required.",
+          "required": true
+        },
+        "session_id": {
+          "type": "string",
+          "description": "FlareSolverr session ID to reuse an existing browser context. Optional.",
+          "default": null
+        },
+        "max_timeout": {
+          "type": "integer",
+          "description": "Maximum time in milliseconds FlareSolverr will wait for the challenge to be solved.",
+          "default": 60000
+        },
+        "flaresolverr_url": {
+          "type": "string",
+          "description": "FlareSolverr API endpoint override. Defaults to FLARESOLVERR_URL env var (http://127.0.0.1:8191/v1).",
+          "default": "http://127.0.0.1:8191/v1"
+        }
+      }
     }
+  },
+  "account_factory": {
+    "cron_enabled": false,
+    "new_profiles_per_day": 2,
+    "maturity_thresholds": {
+      "warming": 1,
+      "ready": 7,
+      "senior": 30,
+      "recycle": 90
+    },
+    "supported_countries": ["BE", "FR", "DE", "GB", "NL"],
+    "implemented_in_step": "3.6",
+    "description": "Orchestrates browser profile creation, warm-up and daily aging. Profiles gain trust over time (7 days to ready, 30 days to senior). One profile = one country = one proxy country."
   },
   "proxy_tiers": {
     "datacenter": { "summary": "Cheap, high throughput. Default for low-risk targets.", "default": true },
@@ -140,8 +352,11 @@
     "POST /run-tool":      "Enqueue a scraping job. Returns {job_id, status}.",
     "GET  /status/{id}":   "Job lifecycle status (queued|started|finished|failed).",
     "GET  /result/{id}":   "Structured JSON result for a finished job.",
-    "GET  /download/{id}": "Binary download (PNG) for screenshot jobs.",
-    "GET  /probe/{domain}":"Synchronous reconnaissance probe — recommended before /run-tool. Lands in Step 2.1.",
+    "GET  /download/{id}": "Binary PNG download for screenshot jobs.",
+    "GET  /probe/{domain}":"Synchronous reconnaissance probe — recommended before /run-tool.",
+    "GET  /factory/profiles":"List registered browser profiles.",
+    "POST /factory/warm/{id}":"Launch warm-up sequence for a profile (10–15 min).",
+    "GET  /factory/recommend":"Return best profile for a domain (?domain=ebay.de).",
     "GET  /risk/{domain}": "Aggregated risk history for a domain.",
     "GET  /capabilities":  "This manifest, served live.",
     "GET  /health":        "Liveness probe."

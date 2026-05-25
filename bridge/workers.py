@@ -109,64 +109,157 @@ def _run_scrapy_subprocess(job_id: str, url, config: dict[str, Any]) -> dict[str
         raise RuntimeError(f"scrapy runner stdout is not valid JSON: {e}") from e
 
 
-def _stub_screenshot(job_id: str, url, config: dict[str, Any]) -> dict[str, Any]:
-    time.sleep(0.3)
-    return {
-        "tool": "screenshot",
+def _run_screenshot_subprocess(job_id: str, url, config: dict[str, Any]) -> dict[str, Any]:
+    """Invoke the screenshot runner as a subprocess.
+
+    Same isolation rationale as Scrapy: Playwright state (browser processes,
+    async loops) must not bleed into the RQ worker process.
+    CLI contract: JSON on stdin, JSON on stdout, exit codes 0/2/3.
+    """
+    payload = {"job_id": job_id, "url": url, **config}
+    cmd = [sys.executable, "-m", "tools.screenshot_runner.run_screenshot"]
+    proc = subprocess.run(
+        cmd,
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        raise RuntimeError(
+            f"screenshot runner exited {proc.returncode}: {stderr[-500:] or '<empty stderr>'}"
+        )
+
+    stdout = (proc.stdout or "").strip()
+    if not stdout:
+        raise RuntimeError("screenshot runner produced empty stdout")
+
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"screenshot runner stdout is not valid JSON: {exc}") from exc
+
+
+def _run_crawl4ai_subprocess(job_id: str, url, config: dict[str, Any]) -> dict[str, Any]:
+    """Invoke the Crawl4AI runner as a subprocess.
+
+    Same isolation rationale as Scrapy and screenshot: async event-loop state,
+    Playwright browser processes and Chromium instances must not bleed into the
+    RQ worker process.
+    CLI contract: JSON on stdin, JSON on stdout, exit codes 0/2/3.
+    """
+    payload = {"job_id": job_id, "url": url, **config}
+    cmd = [sys.executable, "-m", "tools.crawl4ai_runner.run_crawl4ai"]
+    proc = subprocess.run(
+        cmd,
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        raise RuntimeError(
+            f"crawl4ai runner exited {proc.returncode}: {stderr[-500:] or '<empty stderr>'}"
+        )
+
+    stdout = (proc.stdout or "").strip()
+    if not stdout:
+        raise RuntimeError("crawl4ai runner produced empty stdout")
+
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"crawl4ai runner stdout is not valid JSON: {exc}") from exc
+
+
+def _run_firecrawl_subprocess(job_id: str, url, config: dict[str, Any]) -> dict[str, Any]:
+    """Invoke the Firecrawl runner as a subprocess.
+
+    Same isolation rationale as Scrapy/screenshot/crawl4ai: the httpx async
+    connections and potential event-loop state inside run_firecrawl must not
+    bleed into the RQ worker process.
+    CLI contract: JSON on stdin, JSON on stdout, exit codes 0/2/3.
+    """
+    from .config import get_settings
+
+    settings = get_settings()
+    payload = {
+        "job_id": job_id,
         "url": url,
-        "http_status": 200,
-        "proxy": config.get("proxy"),
-        "risk_score": 0.85,
-        "screenshot_path": f"storage/screenshots/{job_id}.png",
-        "_stub": True,
+        "firecrawl_url": settings.firecrawl_url,
+        "firecrawl_api_key": settings.firecrawl_api_key,
+        **config,
     }
+    cmd = [sys.executable, "-m", "tools.firecrawl_runner.run_firecrawl"]
+    proc = subprocess.run(
+        cmd,
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        raise RuntimeError(
+            f"firecrawl runner exited {proc.returncode}: {stderr[-500:] or '<empty stderr>'}"
+        )
+
+    stdout = (proc.stdout or "").strip()
+    if not stdout:
+        raise RuntimeError("firecrawl runner produced empty stdout")
+
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"firecrawl runner stdout is not valid JSON: {exc}") from exc
 
 
-def _stub_crawl4ai(job_id: str, url, config: dict[str, Any]) -> dict[str, Any]:
-    time.sleep(0.3)
-    return {
-        "tool": "crawl4ai",
+def _run_bypass_subprocess(job_id: str, url, config: dict[str, Any]) -> dict[str, Any]:
+    from .config import get_settings
+    settings = get_settings()
+    payload = {
+        "job_id": job_id,
         "url": url,
-        "http_status": 200,
-        "proxy": config.get("proxy"),
-        "risk_score": 0.45,
-        "markdown": "# Stub\nStep 3.3 lands the real Crawl4AI runner.",
-        "_stub": True,
+        "flaresolverr_url": settings.flaresolverr_url,
+        **config,
     }
-
-
-def _stub_firecrawl(job_id: str, url, config: dict[str, Any]) -> dict[str, Any]:
-    time.sleep(0.3)
-    return {
-        "tool": "firecrawl",
-        "url": url,
-        "http_status": 200,
-        "proxy": None,
-        "risk_score": 0.30,
-        "markdown": "# Stub\nStep 3.4 lands the real Firecrawl runner.",
-        "_stub": True,
-    }
-
-
-def _stub_bypass_waf(job_id: str, url, config: dict[str, Any]) -> dict[str, Any]:
-    time.sleep(0.3)
-    return {
-        "tool": "bypass_waf",
-        "url": url,
-        "http_status": 200,
-        "proxy": None,
-        "risk_score": 0.95,
-        "challenge_solved": True,
-        "_stub": True,
-    }
+    cmd = [sys.executable, "-m", "tools.waf_bypass.run_bypass"]
+    proc = subprocess.run(
+        cmd,
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        raise RuntimeError(
+            f"bypass_waf runner exited {proc.returncode}: {stderr[-500:] or '<empty stderr>'}"
+        )
+    stdout = (proc.stdout or "").strip()
+    if not stdout:
+        raise RuntimeError("bypass_waf runner produced empty stdout")
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"bypass_waf runner stdout is not valid JSON: {exc}") from exc
 
 
 _DISPATCH: dict[str, Callable[..., dict[str, Any]]] = {
     "scrapy":     _run_scrapy_subprocess,
-    "screenshot": _stub_screenshot,
-    "crawl4ai":   _stub_crawl4ai,
-    "firecrawl":  _stub_firecrawl,
-    "bypass_waf": _stub_bypass_waf,
+    "screenshot": _run_screenshot_subprocess,
+    "crawl4ai":   _run_crawl4ai_subprocess,
+    "firecrawl":  _run_firecrawl_subprocess,
+    "bypass_waf": _run_bypass_subprocess,
 }
 
 

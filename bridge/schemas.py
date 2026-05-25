@@ -145,3 +145,38 @@ class EscalateResponse(BaseModel):
     avg_risk: float
     max_risk: float
     response_count: int
+
+
+class ProfileResponse(BaseModel):
+    profile_id: str
+    geo_id: str
+    proxy_country: str
+    ua_profile_id: str
+    status: str
+    age_days: int
+    created_at: str | None = None
+    last_active: str | None = None
+    warmed: bool = False
+    cookies_count: int = 0
+
+
+class ProfileCreateRequest(BaseModel):
+    geo_id: str
+    proxy_country: str
+    count: int = Field(default=1, ge=1, le=10)
+    ua_profile_id: str = "chrome127-win"
+
+
+class FactoryStatsResponse(BaseModel):
+    total: int
+    by_status: dict[str, int]
+    oldest_profile: str | None = None
+    newest_profile: str | None = None
+
+
+class DailyRunResponse(BaseModel):
+    created: list[str]
+    warmed: list[str]
+    aged: list[str]
+    recycled: list[str]
+    errors: list[str]
