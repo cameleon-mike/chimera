@@ -48,12 +48,11 @@ def test_dispatch_scrapy_invokes_subprocess(isolated_settings):
     assert kwargs["text"] is True
 
     payload = json.loads(kwargs["input"])
-    assert payload == {
-        "tool": "scrapy",
-        "url": "https://example.com",
-        "config": {"spider": "api_json"},
-        "job_id": "job_abc",
-    }
+    assert payload["tool"] == "scrapy"
+    assert payload["url"] == "https://example.com"
+    assert payload["job_id"] == "job_abc"
+    # config may include ebay_app_ids / ebay_cert_ids injected from settings
+    assert payload["config"]["spider"] == "api_json"
 
 
 # ---------------------------------------------------------------------------

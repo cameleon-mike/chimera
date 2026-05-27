@@ -82,3 +82,50 @@ Risk scores from `risk_events` drive escalation decisions:
 | 0.2–0.5 | scrapy + residential proxy |
 | 0.5–0.8 | crawl4ai + residential |
 | ≥ 0.8 | screenshot + residential |
+
+### `epid_stats`
+
+Aggregated ePID statistics: price quartiles and avg sell time. Populated by `POST /epid/ingest`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| epid | TEXT PK | eBay Product Identifier |
+| brand | TEXT | First word extracted from title |
+| model | TEXT | Words 2-3 extracted from title |
+| total_items | INTEGER | Number of ingested items for this ePID |
+| currency | TEXT | Currency (EUR, GBP, etc.) |
+| median_price | REAL | Median price across items |
+| q1_price | REAL | First quartile price |
+| q2_price | REAL | Second quartile (= median) |
+| q3_price | REAL | Third quartile price |
+| q4_price | REAL | Maximum price |
+| avg_sell_days | REAL | Mean selling time in days (null if no sold items) |
+| min_sell_days | REAL | Minimum selling time in days |
+| max_sell_days | REAL | Maximum selling time in days |
+| sell_days_sample | INTEGER | Number of items used to compute avg_sell_days |
+| last_updated | TEXT | ISO 8601 UTC timestamp of last recompute |
+
+Upsert strategy: `INSERT OR REPLACE` — fully recomputed on each ingest batch.
+
+---
+
+### `scraped_items`
+
+Raw item store — one row per scraped listing (deduplicated by URL).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER PK | Auto-increment |
+| epid | TEXT | eBay Product Identifier (nullable for non-eBay sources) |
+| title | TEXT | Listing title |
+| price_value | REAL | Numeric price |
+| price_currency | TEXT | Currency code |
+| start_date | TEXT | Listing creation date (ISO 8601) |
+| end_date | TEXT | Sold/ended date (ISO 8601) — null for active listings |
+| source | TEXT | Data source: "ebay", "2ememain", "watchcount" |
+| url | TEXT UNIQUE | Canonical URL — deduplication key |
+| scraped_at | TEXT | Ingest timestamp (ISO 8601 UTC) |
+
+Index: `epid` (for per-ePID queries in `recompute_all_stats`)
+
+Inserted by: `POST /epid/ingest` and `GET /ebay/search?ingest=true`

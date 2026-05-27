@@ -71,14 +71,20 @@ from scrapy.utils.project import get_project_settings
 from bridge.config import get_settings
 from tools.scrapy_runner.project.spiders.adaptive import AdaptiveSpider
 from tools.scrapy_runner.project.spiders.api_json import ApiJsonSpider
+from tools.scrapy_runner.project.spiders.ebay_browse import EbayBrowseSpider
+from tools.scrapy_runner.project.spiders.vinted_2ememain import DeuxememainSpider
+from tools.scrapy_runner.project.spiders.watchcount import WatchCountSpider
 
 import re
 
-_JOB_ID_RE = re.compile(r"^[a-f0-9]{1,64}$")
+_JOB_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 _SPIDERS = {
     "api_json": ApiJsonSpider,
     "adaptive": AdaptiveSpider,
+    "ebay_browse": EbayBrowseSpider,
+    "watchcount": WatchCountSpider,
+    "2ememain": DeuxememainSpider,
 }
 
 _SCRAPY_SETTINGS_WHITELIST = {
@@ -144,7 +150,7 @@ def _validate(payload: dict[str, Any]) -> tuple[list[str], str, dict[str, Any], 
         sys.exit(2)
 
     config = payload.get("config") or {}
-    spider_name = config.get("spider", "api_json")
+    spider_name = config.get("spider") or payload.get("spider") or "api_json"
     if spider_name not in _SPIDERS:
         print(json.dumps({"error": "unknown_spider", "spider": spider_name,
                           "available": sorted(_SPIDERS)}), file=sys.stderr)
@@ -283,6 +289,23 @@ def main(argv: list[str] | None = None) -> int:
         spider_kwargs["selectors"] = config.get("selectors") or {}
         spider_kwargs["item_selector"] = config.get("item_selector")
 
+    if spider_name == "ebay_browse":
+        from bridge.config import get_settings as _get_bridge_settings
+        _bs = _get_bridge_settings()
+        spider_kwargs["q"] = config.get("q", "")
+        spider_kwargs["marketplace_id"] = config.get("marketplace_id", getattr(_bs, "ebay_default_marketplace", "EBAY_FR"))
+        spider_kwargs["max_pages"] = int(config.get("max_pages", 3))
+        spider_kwargs["ebay_app_ids"] = config.get("ebay_app_ids") or getattr(_bs, "ebay_app_ids", [])
+        spider_kwargs["ebay_cert_ids"] = config.get("ebay_cert_ids") or getattr(_bs, "ebay_cert_ids", [])
+
+    if spider_name == "watchcount":
+        spider_kwargs["q"] = config.get("q", "")
+        spider_kwargs["marketplace"] = config.get("marketplace", "EBAY_FR")
+
+    if spider_name == "2ememain":
+        spider_kwargs["q"] = config.get("q", "")
+        spider_kwargs["max_pages"] = int(config.get("max_pages", 3))
+
     process = CrawlerProcess(settings=settings, install_root_handler=False)
     crawler = process.create_crawler(SpiderCls)
     process.crawl(crawler, **spider_kwargs)
@@ -296,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
     spider = crawler.spider
     items = getattr(spider, "_collected_items", []) or []
     final_status = getattr(spider, "_final_http_status", None) or 0
+    recaptcha_detected = getattr(spider, "_recaptcha_detected", False)
+    blocked = getattr(spider, "_blocked", False)
     duration_ms = int((time.perf_counter() - t0) * 1000)
     finished_at = _iso_now()
 
@@ -316,6 +341,8 @@ def main(argv: list[str] | None = None) -> int:
             "finished_at": finished_at,
             "duration_ms": duration_ms,
             "item_count": len(items),
+            "recaptcha_detected": recaptcha_detected,
+            "blocked": blocked,
         },
         "_escalation": _build_escalation(job_id, urls),
     }

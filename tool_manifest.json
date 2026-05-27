@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.7.1",
+  "manifest_version": "0.7.5",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -41,7 +41,11 @@
       "params": {
         "spider": {
           "type": "string",
-          "enum": ["api_json", "adaptive"],
+          "enum": [
+            "api_json",
+            "adaptive",
+            "ebay_browse"
+          ],
           "default": "api_json",
           "description": "Which built-in spider to run. api_json for JSON APIs (light parsing); adaptive for HTML pages driven by CSS selectors."
         },
@@ -87,14 +91,27 @@
       "params": {
         "mode": {
           "type": "string",
-          "enum": ["scrape", "crawl"],
+          "enum": [
+            "scrape",
+            "crawl"
+          ],
           "default": "scrape",
           "description": "scrape = single URL (synchronous); crawl = follow links up to max_pages (async poll)."
         },
         "formats": {
           "type": "array",
-          "items": { "type": "string", "enum": ["markdown", "html", "rawHtml", "links"] },
-          "default": ["markdown"],
+          "items": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "html",
+              "rawHtml",
+              "links"
+            ]
+          },
+          "default": [
+            "markdown"
+          ],
           "description": "Output formats to request from Firecrawl. markdown is the primary LLM-ready format."
         },
         "only_main_content": {
@@ -206,7 +223,13 @@
         },
         "cache_mode": {
           "type": "string",
-          "enum": ["bypass", "enabled", "disabled", "read_only", "write_only"],
+          "enum": [
+            "bypass",
+            "enabled",
+            "disabled",
+            "read_only",
+            "write_only"
+          ],
           "description": "Crawl4AI cache policy. Use 'bypass' in production to avoid stale content.",
           "default": "bypass"
         },
@@ -240,7 +263,10 @@
         },
         "proxy_tier": {
           "type": "string",
-          "enum": ["residential", "datacenter"],
+          "enum": [
+            "residential",
+            "datacenter"
+          ],
           "default": "residential"
         },
         "locale": {
@@ -259,7 +285,10 @@
         },
         "wait_until": {
           "type": "string",
-          "enum": ["networkidle", "domcontentloaded"],
+          "enum": [
+            "networkidle",
+            "domcontentloaded"
+          ],
           "default": "networkidle"
         },
         "wait_ms": {
@@ -312,15 +341,130 @@
       "senior": 30,
       "recycle": 90
     },
-    "supported_countries": ["BE", "FR", "DE", "GB", "NL"],
+    "supported_countries": [
+      "BE",
+      "FR",
+      "DE",
+      "GB",
+      "NL"
+    ],
     "implemented_in_step": "3.6",
     "description": "Orchestrates browser profile creation, warm-up and daily aging. Profiles gain trust over time (7 days to ready, 30 days to senior). One profile = one country = one proxy country."
   },
+  "watchcount": {
+    "endpoint": "GET /watchcount/search",
+    "description": "WatchCount.com search: returns eBay listings sorted by watch count with end_date. Tries Scrapy first; auto-escalates to Screenshot+Groq Vision on reCAPTCHA. Primary use: populate end_date missing from eBay Browse API.",
+    "implemented_in_step": "4.2",
+    "escalation": "scrapy → screenshot+groq_vision on reCAPTCHA",
+    "params": {
+      "q": {
+        "type": "string",
+        "description": "Search query (e.g. 'wacom cintiq 16'). Required.",
+        "required": true
+      },
+      "marketplace": {
+        "type": "string",
+        "enum": [
+          "EBAY_FR",
+          "EBAY_DE",
+          "EBAY_GB",
+          "EBAY_BE",
+          "EBAY_NL"
+        ],
+        "default": "EBAY_FR"
+      }
+    }
+  },
+  "2ememain": {
+    "endpoint": "GET /2ememain/search",
+    "description": "2ememain.be classified ads scraper. Returns listings CSV-compatible with eBay (EbayPrice schema, start_date as pub_date). When site blocks Scrapy (403/captcha), returns blocked=true with empty items.",
+    "implemented_in_step": "4.3",
+    "params": {
+      "q": {
+        "type": "string",
+        "description": "Search query (e.g. 'wacom cintiq 16'). Required.",
+        "required": true
+      },
+      "max_pages": {
+        "type": "integer",
+        "default": 3,
+        "description": "Max result pages to fetch (30 items/page)."
+      }
+    }
+  },
+  "ebay": {
+    "endpoint": "GET /ebay/search",
+    "description": "Synchronous eBay Browse API search. Returns items matching the query. Auth Bearer required.",
+    "marketplace_ids": [
+      "EBAY_FR",
+      "EBAY_DE",
+      "EBAY_GB",
+      "EBAY_BE",
+      "EBAY_NL"
+    ],
+    "max_pages": 3,
+    "items_per_page": 200,
+    "daily_limit_per_key": 4800,
+    "implemented_in_step": "4.1",
+    "params": {
+      "q": {
+        "type": "string",
+        "description": "Search query (e.g. 'wacom cintiq 16'). Required.",
+        "required": true
+      },
+      "marketplace": {
+        "type": "string",
+        "enum": [
+          "EBAY_FR",
+          "EBAY_DE",
+          "EBAY_GB",
+          "EBAY_BE",
+          "EBAY_NL"
+        ],
+        "default": "EBAY_FR"
+      },
+      "max_pages": {
+        "type": "integer",
+        "default": 3,
+        "description": "Max pages to fetch (200 items/page, max 3 pages = 600 items)."
+      }
+    }
+  },
+  "epid": {
+    "description": "ePID statistics: price quartiles + avg_sell_days computed from ingested scraped items. Requires POST /epid/ingest to populate; then GET /epid/stats/{epid} or GET /epid/search for retrieval.",
+    "implemented_in_step": "4.5",
+    "endpoints": [
+      "GET /epid/stats/{epid}",
+      "POST /epid/ingest",
+      "GET /epid/search"
+    ],
+    "params": {
+      "epid": {
+        "type": "string",
+        "description": "eBay Product Identifier. Required for /epid/stats/{epid}.",
+        "required": true
+      },
+      "q": {
+        "type": "string",
+        "description": "Search term for /epid/search (LIKE match on brand or model). Required.",
+        "required": true
+      }
+    }
+  },
   "proxy_tiers": {
-    "datacenter": { "summary": "Cheap, high throughput. Default for low-risk targets.", "default": true },
-    "residential": { "summary": "Real ISP IPs. Used when risk_score >= 0.5." },
-    "isp_static": { "summary": "Sticky residential — for authenticated sessions." },
-    "mobile": { "summary": "4G mobile carriers. Highest trust, lowest throughput." }
+    "datacenter": {
+      "summary": "Cheap, high throughput. Default for low-risk targets.",
+      "default": true
+    },
+    "residential": {
+      "summary": "Real ISP IPs. Used when risk_score >= 0.5."
+    },
+    "isp_static": {
+      "summary": "Sticky residential — for authenticated sessions."
+    },
+    "mobile": {
+      "summary": "4G mobile carriers. Highest trust, lowest throughput."
+    }
   },
   "risk_thresholds": {
     "ok_max": 0.2,
@@ -330,35 +474,62 @@
   },
   "escalation_policy": {
     "thresholds": {
-      "ok_max":        0.2,
-      "warn_max":      0.5,
+      "ok_max": 0.2,
+      "warn_max": 0.5,
       "challenge_max": 0.8,
-      "block_min":     0.8
+      "block_min": 0.8
     },
     "actions": {
-      "ok":        { "tool": "scrapy",      "proxy_tier": "datacenter" },
-      "warn":      { "tool": "scrapy",      "proxy_tier": "residential", "delay_multiplier": 2.0 },
-      "challenge": { "tool": "crawl4ai",   "proxy_tier": "residential" },
-      "block":     { "tool": "screenshot", "proxy_tier": "residential", "burn_profile": true }
+      "ok": {
+        "tool": "scrapy",
+        "proxy_tier": "datacenter"
+      },
+      "warn": {
+        "tool": "scrapy",
+        "proxy_tier": "residential",
+        "delay_multiplier": 2.0
+      },
+      "challenge": {
+        "tool": "crawl4ai",
+        "proxy_tier": "residential"
+      },
+      "block": {
+        "tool": "screenshot",
+        "proxy_tier": "residential",
+        "burn_profile": true
+      }
     },
     "runtime_escalation": {
       "trigger_min_responses": 3,
-      "trigger_avg_risk":      0.5,
-      "trigger_max_risk":      0.8
+      "trigger_avg_risk": 0.5,
+      "trigger_max_risk": 0.8
     }
   },
-  "vendors_detected": ["cloudflare", "akamai", "perimeterx", "datadome", "captcha_generic"],
+  "vendors_detected": [
+    "cloudflare",
+    "akamai",
+    "perimeterx",
+    "datadome",
+    "captcha_generic"
+  ],
   "endpoints": {
-    "POST /run-tool":      "Enqueue a scraping job. Returns {job_id, status}.",
-    "GET  /status/{id}":   "Job lifecycle status (queued|started|finished|failed).",
-    "GET  /result/{id}":   "Structured JSON result for a finished job.",
+    "POST /run-tool": "Enqueue a scraping job. Returns {job_id, status}.",
+    "GET  /status/{id}": "Job lifecycle status (queued|started|finished|failed).",
+    "GET  /result/{id}": "Structured JSON result for a finished job.",
     "GET  /download/{id}": "Binary PNG download for screenshot jobs.",
-    "GET  /probe/{domain}":"Synchronous reconnaissance probe — recommended before /run-tool.",
-    "GET  /factory/profiles":"List registered browser profiles.",
-    "POST /factory/warm/{id}":"Launch warm-up sequence for a profile (10–15 min).",
-    "GET  /factory/recommend":"Return best profile for a domain (?domain=ebay.de).",
+    "GET  /probe/{domain}": "Synchronous reconnaissance probe — recommended before /run-tool.",
+    "GET  /factory/profiles": "List registered browser profiles.",
+    "POST /factory/warm/{id}": "Launch warm-up sequence for a profile (10–15 min).",
+    "GET  /factory/recommend": "Return best profile for a domain (?domain=ebay.de).",
+    "GET  /watchcount/search": "WatchCount.com search — watch count + end_date. Scrapy first, Screenshot+Groq Vision fallback. Auth required.",
+    "GET  /2ememain/search": "2ememain.be classified ads search. Returns items CSV-compatible with eBay. Auth required.",
+    "GET  /ebay/search": "Synchronous eBay Browse API search. Returns items[]. Auth required.",
     "GET  /risk/{domain}": "Aggregated risk history for a domain.",
-    "GET  /capabilities":  "This manifest, served live.",
-    "GET  /health":        "Liveness probe."
+    "GET  /capabilities": "This manifest, served live.",
+    "GET  /health": "Liveness probe.",
+    "GET /aggregate/search": "Multi-source aggregator — parallel eBay + 2ememain, fuzzy dedup, unified CSV with source column. Auth required.",
+    "GET  /epid/stats/{epid}": "Full ePID stats sheet: price quartiles + avg_sell_days. 404 if unknown.",
+    "POST /epid/ingest": "Ingest scraped items into scraped_items table; recompute ePID stats. Body: {items, source}.",
+    "GET  /epid/search": "Search ePID stats by brand or model (LIKE). Returns list of stats sheets."
   }
 }

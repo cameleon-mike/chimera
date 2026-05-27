@@ -97,6 +97,26 @@ class Settings(BaseSettings):
     factory_new_profiles_per_day: int = Field(default=2, description="New profiles created per daily run.")
     factory_profiles_dir: str = Field(default="storage/cookies", description="Profile directory (overrides cookies_dir for factory if set).")
 
+    # --- eBay API credentials (Step 4.1) -------------------------------------
+    ebay_app_id_1: str = Field(default="", description="eBay App ID key 1 (EBAY_APP_ID_1)")
+    ebay_cert_id_1: str = Field(default="", description="eBay Cert ID key 1 (EBAY_CERT_ID_1)")
+    ebay_app_id_2: str = Field(default="", description="eBay App ID key 2 (EBAY_APP_ID_2, optional)")
+    ebay_cert_id_2: str = Field(default="", description="eBay Cert ID key 2 (EBAY_CERT_ID_2, optional)")
+    ebay_app_id_3: str = Field(default="", description="eBay App ID key 3 (EBAY_APP_ID_3, optional)")
+    ebay_cert_id_3: str = Field(default="", description="eBay Cert ID key 3 (EBAY_CERT_ID_3, optional)")
+    ebay_default_marketplace: str = Field(default="EBAY_FR")
+
+    @property
+    def ebay_app_ids(self) -> list[str]:
+        return [x for x in [self.ebay_app_id_1, self.ebay_app_id_2, self.ebay_app_id_3] if x]
+
+    @property
+    def ebay_cert_ids(self) -> list[str]:
+        return [x for x in [self.ebay_cert_id_1, self.ebay_cert_id_2, self.ebay_cert_id_3] if x]
+
+    # --- Groq Vision (Step 4.2) -----------------------------------------
+    groq_api_key: str = Field(default="", description="Groq API key for vision extraction (GROQ_API_KEY)")
+
     # --- Risk thresholds (mirror tool_manifest.json) ------------------
     risk_ok_max: float = 0.2
     risk_suspect_max: float = 0.5

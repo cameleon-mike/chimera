@@ -25,6 +25,7 @@ dependencies = [
     "curl-cffi>=0.7",
     "prometheus-client>=0.20",
     "apscheduler>=3.10",
+    "groq>=0.9",
 ]
 
 [project.optional-dependencies]

@@ -75,6 +75,12 @@ def _run_scrapy_subprocess(job_id: str, url, config: dict[str, Any]) -> dict[str
     The subprocess reuses tools.scrapy_runner.run_scrapy's CLI contract:
     JSON in on stdin, JSON out on stdout, exit codes 0/2/3.
     """
+    from .config import get_settings as _get_settings
+    _s = _get_settings()
+    config = dict(config)  # ne pas muter l'original
+    config.setdefault("ebay_app_ids", getattr(_s, "ebay_app_ids", []))
+    config.setdefault("ebay_cert_ids", getattr(_s, "ebay_cert_ids", []))
+
     payload = {
         "tool": "scrapy",
         "url": url,

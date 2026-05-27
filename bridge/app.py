@@ -24,11 +24,19 @@ from .config import get_settings
 from .logging_setup import setup_logging, write_audit
 from . import queue as q
 from .schemas import (
+    AggregateSearchResponse,
+    AggregatedItem,
     DailyRunResponse,
+    EbayItem,
+    EbayPrice,
+    EbaySearchResponse,
+    EpidStats,
     EscalateRequest,
     EscalateResponse,
     FactoryStatsResponse,
     HealthResponse,
+    IngestRequest,
+    IngestResponse,
     JobStatus,
     ProfileCreateRequest,
     ProfileResponse,
@@ -38,6 +46,10 @@ from .schemas import (
     RunToolRequest,
     RunToolResponse,
     StatusResponse,
+    TwoememainItem,
+    TwoememainSearchResponse,
+    WatchCountItem,
+    WatchCountSearchResponse,
 )
 from tools.common.domain_validator import validate_fqdn
 
@@ -106,6 +118,36 @@ def _init_risk_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_profiles_status ON profiles(status);
             CREATE INDEX IF NOT EXISTS idx_profiles_country ON profiles(proxy_country);
+            CREATE TABLE IF NOT EXISTS epid_stats (
+                epid            TEXT PRIMARY KEY,
+                brand           TEXT,
+                model           TEXT,
+                total_items     INTEGER DEFAULT 0,
+                currency        TEXT,
+                median_price    REAL,
+                q1_price        REAL,
+                q2_price        REAL,
+                q3_price        REAL,
+                q4_price        REAL,
+                avg_sell_days   REAL,
+                min_sell_days   REAL,
+                max_sell_days   REAL,
+                sell_days_sample INTEGER DEFAULT 0,
+                last_updated    TEXT
+            );
+            CREATE TABLE IF NOT EXISTS scraped_items (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                epid            TEXT,
+                title           TEXT,
+                price_value     REAL,
+                price_currency  TEXT,
+                start_date      TEXT,
+                end_date        TEXT,
+                source          TEXT,
+                url             TEXT UNIQUE,
+                scraped_at      TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_scraped_items_epid ON scraped_items(epid);
         """)
         conn.commit()
     finally:
@@ -534,6 +576,227 @@ async def download_artifact(
     )
 
 
+# --- eBay search endpoint ----------------------------------------------------
+
+
+@app.get("/ebay/search", response_model=EbaySearchResponse, tags=["ebay"])
+async def ebay_search(
+    q: str,
+    marketplace: str = "EBAY_FR",
+    max_pages: int = 3,
+    ingest: bool = False,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> EbaySearchResponse:
+    """Synchronous eBay Browse API search via Scrapy spider. Auth Bearer required."""
+    if not getattr(settings, "ebay_app_ids", []):
+        raise HTTPException(status_code=503, detail="eBay API keys not configured")
+
+    import asyncio
+    from datetime import datetime, timezone
+    from .workers import _run_scrapy_subprocess
+
+    job_id = uuid.uuid4().hex[:16]
+    config = {
+        "spider": "ebay_browse",
+        "q": q,
+        "marketplace_id": marketplace,
+        "max_pages": max_pages,
+        "respect_robots": False,
+        "ebay_app_ids": getattr(settings, "ebay_app_ids", []),
+        "ebay_cert_ids": getattr(settings, "ebay_cert_ids", []),
+    }
+
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                _run_scrapy_subprocess,
+                job_id,
+                "https://api.ebay.com/buy/browse/v1/item_summary/search",
+                config,
+            ),
+            timeout=120.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="eBay search timed out after 120s")
+
+    raw_items = result.get("items", [])
+    items = []
+    for raw in raw_items:
+        price_data = raw.get("price")
+        if isinstance(price_data, dict):
+            price = EbayPrice(
+                value=price_data.get("value"),
+                currency=price_data.get("currency"),
+            )
+        else:
+            price = None
+        items.append(EbayItem(
+            title=raw.get("title"),
+            price=price,
+            epid=raw.get("epid"),
+            start_date=raw.get("start_date"),
+            end_date=raw.get("end_date"),
+            photo_url=raw.get("photo_url"),
+            link=raw.get("link"),
+        ))
+
+    risk_score = result.get("risk_score", 0.0)
+
+    if ingest and items:
+        from tools.stats.epid_calculator import recompute_all_stats as _recompute
+        _conn = sqlite3.connect(str(_RISK_DB_PATH))
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            _now = _dt.now(_tz.utc).isoformat()
+            for it in items:
+                _url = it.link
+                if not _url:
+                    continue
+                _conn.execute(
+                    """
+                    INSERT OR IGNORE INTO scraped_items
+                        (epid, title, price_value, price_currency,
+                         start_date, end_date, source, url, scraped_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        it.epid, it.title,
+                        it.price.value if it.price else None,
+                        it.price.currency if it.price else None,
+                        it.start_date, it.end_date,
+                        "ebay", _url, _now,
+                    ),
+                )
+            _conn.commit()
+            _recompute(_conn)
+        finally:
+            _conn.close()
+
+    return EbaySearchResponse(
+        query=q,
+        marketplace=marketplace,
+        total_items=len(items),
+        items=items,
+        api_calls_used=max_pages,
+        risk_scores=[risk_score] if risk_score else [],
+        ts=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+# --- WatchCount endpoint ------------------------------------------------------
+
+_WATCHCOUNT_MARKETPLACE_LANG: dict[str, str] = {
+    "EBAY_FR": "fr",
+    "EBAY_DE": "de",
+    "EBAY_GB": "gb",
+    "EBAY_BE": "fr",
+    "EBAY_NL": "nl",
+}
+
+
+@app.get("/watchcount/search", response_model=WatchCountSearchResponse, tags=["watchcount"])
+async def watchcount_search(
+    q: str,
+    marketplace: str = "EBAY_FR",
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> WatchCountSearchResponse:
+    """WatchCount.com search: Scrapy first, auto-escalates to Screenshot+Groq Vision on reCAPTCHA."""
+    import asyncio
+    from datetime import datetime, timezone
+    from urllib.parse import quote_plus
+    from .workers import _run_scrapy_subprocess, _run_screenshot_subprocess
+
+    lang = _WATCHCOUNT_MARKETPLACE_LANG.get(marketplace, "en")
+    url = (
+        "https://www.watchcount.com/listing.cgi"
+        f"?lang={lang}&ldc=0&q={quote_plus(q)}&order=wc"
+    )
+
+    scrapy_job_id = uuid.uuid4().hex[:16]
+    scrapy_config = {
+        "spider": "watchcount",
+        "q": q,
+        "marketplace": marketplace,
+        "respect_robots": False,
+    }
+
+    # Step 1: Try Scrapy spider
+    tool_used = "scrapy"
+    recaptcha_detected = False
+    items_raw: list[dict] = []
+
+    try:
+        scrapy_result = await asyncio.wait_for(
+            asyncio.to_thread(_run_scrapy_subprocess, scrapy_job_id, url, scrapy_config),
+            timeout=60.0,
+        )
+        items_raw = scrapy_result.get("items", [])
+        recaptcha_detected = scrapy_result.get("_meta", {}).get("recaptcha_detected", False)
+    except asyncio.TimeoutError:
+        logger.warning("watchcount_scrapy_timeout job_id=%s", scrapy_job_id)
+        recaptcha_detected = True
+    except Exception as exc:
+        logger.warning("watchcount_scrapy_error: %s", repr(exc))
+        recaptcha_detected = True
+
+    # Step 2: Escalate to Screenshot + Groq Vision when reCAPTCHA or no items
+    if recaptcha_detected or not items_raw:
+        tool_used = "screenshot+groq_vision"
+        try:
+            ss_job_id = uuid.uuid4().hex[:16]
+            ss_result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _run_screenshot_subprocess,
+                    ss_job_id,
+                    url,
+                    {"profile_id": "default", "wait_ms": 2000, "headless": True},
+                ),
+                timeout=90.0,
+            )
+            png_path = ss_result.get("screenshot_path")
+            groq_key = settings.groq_api_key
+            if png_path and Path(png_path).exists() and groq_key:
+                from tools.groq_vision.extract_dates import GroqVisionExtractor
+                extractor = GroqVisionExtractor(groq_key)
+                items_raw = extractor.extract_items(png_path, query=q)
+            elif not groq_key:
+                logger.warning("watchcount_groq_key_missing — screenshot taken but no vision extraction")
+                tool_used = "screenshot_only"
+            else:
+                logger.warning("watchcount_screenshot_path_missing")
+                tool_used = "screenshot_failed"
+        except asyncio.TimeoutError:
+            logger.warning("watchcount_screenshot_timeout")
+            tool_used = "escalation_timeout"
+        except Exception as exc:
+            logger.warning("watchcount_escalation_error: %s", repr(exc))
+            tool_used = "escalation_error"
+
+    # Normalise items to WatchCountItem schema
+    items = [
+        WatchCountItem(
+            title=raw.get("title"),
+            watch_count=raw.get("watch_count"),
+            end_date=raw.get("end_date"),
+            price=raw.get("price"),
+            ebay_url=raw.get("ebay_url"),
+            ebay_item_id=raw.get("ebay_item_id"),
+            source=raw.get("source", "watchcount"),
+        )
+        for raw in items_raw
+    ]
+
+    return WatchCountSearchResponse(
+        query=q,
+        marketplace=marketplace,
+        total_items=len(items),
+        items=items,
+        tool_used=tool_used,
+        recaptcha_detected=recaptcha_detected,
+        ts=datetime.now(timezone.utc).isoformat(),
+    )
+
+
 # --- Profile factory endpoints -----------------------------------------------
 
 
@@ -639,3 +902,369 @@ async def recommend_factory_profile(
     if not profile:
         raise HTTPException(status_code=404, detail="no ready profile found")
     return profile
+
+
+# --- 2ememain.be search endpoint --------------------------------------------
+
+
+@app.get("/2ememain/search", response_model=TwoememainSearchResponse, tags=["2ememain"])
+async def search_2ememain(
+    q: str,
+    max_pages: int = 3,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> TwoememainSearchResponse:
+    """Synchronous 2ememain.be search via Scrapy spider. Auth Bearer required.
+
+    Returns listings CSV-compatible with /ebay/search (EbayPrice, start_date, end_date).
+    When the site blocks scrapy (403/429/captcha), returns items=[] and blocked=True.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+    from .workers import _run_scrapy_subprocess, _run_screenshot_subprocess
+
+    job_id = uuid.uuid4().hex[:16]
+    url = f"https://www.2ememain.be/q/{q}/"
+    config = {
+        "spider": "2ememain",
+        "q": q,
+        "max_pages": max_pages,
+        "respect_robots": False,
+    }
+
+    try:
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(_run_scrapy_subprocess, job_id, url, config),
+                timeout=120.0,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="2ememain search timed out after 120s")
+
+        raw_items = result.get("items", [])
+        blocked = result.get("_meta", {}).get("blocked", False)
+        tool_used = "scrapy"
+
+        # Escalade vers Screenshot + Groq Vision quand le site bloque (403/429)
+        if blocked:
+            try:
+                ss_job_id = uuid.uuid4().hex[:16]
+                ss_result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        _run_screenshot_subprocess,
+                        ss_job_id,
+                        url,
+                        {"profile_id": "default", "wait_ms": 2000, "headless": True},
+                    ),
+                    timeout=90.0,
+                )
+                png_path = ss_result.get("screenshot_path")
+                groq_key = settings.groq_api_key
+                if png_path and Path(png_path).exists() and groq_key:
+                    from tools.groq_vision.extract_dates import GroqVisionExtractor
+                    extractor = GroqVisionExtractor(groq_key)
+                    raw_items = extractor.extract_items(png_path, query=q)
+                    tool_used = "screenshot+groq_vision"
+                elif not groq_key:
+                    logger.warning("2ememain_groq_key_missing — screenshot taken but no vision extraction")
+                    tool_used = "screenshot_only"
+                else:
+                    logger.warning("2ememain_screenshot_path_missing")
+                    tool_used = "screenshot_failed"
+            except asyncio.TimeoutError:
+                logger.warning("2ememain_screenshot_timeout")
+                tool_used = "escalation_timeout"
+            except Exception as exc:
+                logger.warning("2ememain_groq_vision_api_error: %s", repr(exc))
+                return TwoememainSearchResponse(
+                    query=q,
+                    total_items=0,
+                    items=[],
+                    tool_used="escalation_error",
+                    blocked=True,
+                    ts=datetime.now(timezone.utc).isoformat(),
+                )
+
+        items = []
+        for raw in raw_items:
+            price_data = raw.get("price")
+            if isinstance(price_data, dict):
+                price = EbayPrice(
+                    value=price_data.get("value"),
+                    currency=price_data.get("currency"),
+                )
+            else:
+                price = None
+            items.append(TwoememainItem(
+                title=raw.get("title"),
+                price=price,
+                start_date=raw.get("start_date"),
+                end_date=raw.get("end_date"),
+                photo_url=raw.get("photo_url"),
+                link=raw.get("link"),
+                location=raw.get("location"),
+            ))
+
+        return TwoememainSearchResponse(
+            query=q,
+            total_items=len(items),
+            items=items,
+            tool_used=tool_used,
+            blocked=blocked,
+            ts=datetime.now(timezone.utc).isoformat(),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("2ememain_unhandled_error: %s", repr(exc), exc_info=True)
+        return TwoememainSearchResponse(
+            query=q,
+            total_items=0,
+            items=[],
+            tool_used="escalation_error",
+            blocked=True,
+            error=str(exc),
+            ts=datetime.now(timezone.utc).isoformat(),
+        )
+
+
+# --- Multi-source aggregator endpoint -----------------------------------------
+
+
+@app.get("/aggregate/search", response_model=AggregateSearchResponse, tags=["aggregate"])
+async def aggregate_search(
+    q: str,
+    marketplace: str = "EBAY_FR",
+    max_pages: int = 3,
+    ingest: bool = False,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> AggregateSearchResponse:
+    """Parallel eBay + 2ememain search with fuzzy deduplication.
+
+    Runs both sources concurrently; removes 2ememain items whose title ≥ 82%
+    similar AND price within 25% of an eBay item. Returns a unified CSV-
+    compatible list with a `source` column.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+
+    from .aggregator import deduplicate, fetch_2ememain_raw, fetch_ebay_raw
+
+    ebay_result, deux_result = await asyncio.gather(
+        fetch_ebay_raw(q, marketplace, max_pages, settings),
+        fetch_2ememain_raw(q, max_pages),
+        return_exceptions=False,
+    )
+
+    # --- normalise eBay raw items ---
+    ebay_items_raw = ebay_result.get("items", [])
+    ebay_items = []
+    for raw in ebay_items_raw:
+        price_data = raw.get("price")
+        price = EbayPrice(**price_data) if isinstance(price_data, dict) else None
+        ebay_items.append(EbayItem(
+            title=raw.get("title"),
+            price=price,
+            epid=raw.get("epid"),
+            start_date=raw.get("start_date"),
+            end_date=raw.get("end_date"),
+            photo_url=raw.get("photo_url"),
+            link=raw.get("link"),
+        ))
+
+    # --- normalise 2ememain raw items ---
+    deux_items_raw = deux_result.get("items", [])
+    twoememain_blocked = deux_result.get("_meta", {}).get("blocked", False)
+    deux_items = []
+    for raw in deux_items_raw:
+        price_data = raw.get("price")
+        price = EbayPrice(**price_data) if isinstance(price_data, dict) else None
+        deux_items.append(TwoememainItem(
+            title=raw.get("title"),
+            price=price,
+            start_date=raw.get("start_date"),
+            end_date=raw.get("end_date"),
+            photo_url=raw.get("photo_url"),
+            link=raw.get("link"),
+            location=raw.get("location"),
+        ))
+
+    merged, n_dups = deduplicate(ebay_items, deux_items)
+
+    sources = {
+        "ebay": sum(1 for i in merged if i.source == "ebay"),
+        "2ememain": sum(1 for i in merged if i.source == "2ememain"),
+    }
+
+    if ingest and merged:
+        from tools.stats.epid_calculator import recompute_all_stats as _recompute_agg
+        _conn_agg = sqlite3.connect(str(_RISK_DB_PATH))
+        try:
+            from datetime import datetime as _dt2, timezone as _tz2
+            _now2 = _dt2.now(_tz2.utc).isoformat()
+            for it in merged:
+                _url2 = it.link
+                if not _url2:
+                    continue
+                _epid2 = getattr(it, "epid", None)
+                _conn_agg.execute(
+                    """
+                    INSERT OR IGNORE INTO scraped_items
+                        (epid, title, price_value, price_currency,
+                         start_date, end_date, source, url, scraped_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        _epid2, it.title,
+                        it.price.value if it.price else None,
+                        it.price.currency if it.price else None,
+                        it.start_date, it.end_date,
+                        it.source, _url2, _now2,
+                    ),
+                )
+            _conn_agg.commit()
+            _recompute_agg(_conn_agg)
+        finally:
+            _conn_agg.close()
+
+    return AggregateSearchResponse(
+        query=q,
+        marketplace=marketplace,
+        total_items=len(merged),
+        items=merged,
+        sources=sources,
+        duplicates_removed=n_dups,
+        ebay_blocked=not bool(getattr(settings, "ebay_app_ids", [])),
+        twoememain_blocked=twoememain_blocked,
+        ts=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+# --- ePID stats endpoints ----------------------------------------------------
+
+
+def _get_epid_conn() -> sqlite3.Connection:
+    return sqlite3.connect(str(_RISK_DB_PATH))
+
+
+@app.get("/epid/stats/{epid}", response_model=EpidStats, tags=["epid"])
+async def get_epid_stats(
+    epid: str,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> EpidStats:
+    """Return the full ePID stats sheet."""
+    conn = _get_epid_conn()
+    try:
+        cur = conn.execute(
+            """
+            SELECT epid, brand, model, total_items, currency,
+                   median_price, q1_price, q2_price, q3_price, q4_price,
+                   avg_sell_days, min_sell_days, max_sell_days, sell_days_sample,
+                   last_updated
+            FROM epid_stats WHERE epid = ?
+            """,
+            (epid,),
+        )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"ePID {epid!r} not found")
+
+    return EpidStats(
+        epid=row[0], brand=row[1], model=row[2], total_items=row[3],
+        currency=row[4], median_price=row[5], q1_price=row[6], q2_price=row[7],
+        q3_price=row[8], q4_price=row[9], avg_sell_days=row[10],
+        min_sell_days=row[11], max_sell_days=row[12], sell_days_sample=row[13],
+        last_updated=row[14],
+    )
+
+
+@app.post("/epid/ingest", response_model=IngestResponse, tags=["epid"])
+async def ingest_epid_items(
+    req: IngestRequest,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> IngestResponse:
+    """Ingest scraped items into scraped_items and recompute ePID stats."""
+    from datetime import datetime, timezone
+    from tools.stats.epid_calculator import recompute_all_stats
+
+    now = datetime.now(timezone.utc).isoformat()
+    ingested = 0
+    touched_epids: set[str] = set()
+
+    conn = _get_epid_conn()
+    try:
+        for item in req.items:
+            url = item.get("url")
+            if not url:
+                continue
+            epid = item.get("epid")
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO scraped_items
+                    (epid, title, price_value, price_currency,
+                     start_date, end_date, source, url, scraped_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    epid,
+                    item.get("title"),
+                    item.get("price_value"),
+                    item.get("price_currency"),
+                    item.get("start_date"),
+                    item.get("end_date"),
+                    item.get("source", req.source),
+                    url,
+                    now,
+                ),
+            )
+            if cur.rowcount > 0:
+                ingested += 1
+                if epid:
+                    touched_epids.add(epid)
+        conn.commit()
+        updated_epids = recompute_all_stats(conn)
+    finally:
+        conn.close()
+
+    return IngestResponse(ingested=ingested, epids_updated=len(updated_epids))
+
+
+@app.get("/epid/search", response_model=list[EpidStats], tags=["epid"])
+async def search_epid(
+    q: str,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> list[EpidStats]:
+    """Search ePID stats by brand or model (LIKE search)."""
+    pattern = f"%{q}%"
+    conn = _get_epid_conn()
+    try:
+        cur = conn.execute(
+            """
+            SELECT epid, brand, model, total_items, currency,
+                   median_price, q1_price, q2_price, q3_price, q4_price,
+                   avg_sell_days, min_sell_days, max_sell_days, sell_days_sample,
+                   last_updated
+            FROM epid_stats
+            WHERE brand LIKE ? OR model LIKE ?
+            ORDER BY total_items DESC
+            LIMIT 50
+            """,
+            (pattern, pattern),
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    return [
+        EpidStats(
+            epid=r[0], brand=r[1], model=r[2], total_items=r[3],
+            currency=r[4], median_price=r[5], q1_price=r[6], q2_price=r[7],
+            q3_price=r[8], q4_price=r[9], avg_sell_days=r[10],
+            min_sell_days=r[11], max_sell_days=r[12], sell_days_sample=r[13],
+            last_updated=r[14],
+        )
+        for r in rows
+    ]

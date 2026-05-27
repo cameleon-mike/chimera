@@ -180,3 +180,121 @@ class DailyRunResponse(BaseModel):
     aged: list[str]
     recycled: list[str]
     errors: list[str]
+
+
+class EbayPrice(BaseModel):
+    value: float | None = None
+    currency: str | None = None
+
+
+class EbayItem(BaseModel):
+    title: str | None = None
+    price: EbayPrice | None = None
+    epid: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    photo_url: str | None = None
+    link: str | None = None
+
+
+class EbaySearchResponse(BaseModel):
+    query: str
+    marketplace: str
+    total_items: int
+    items: list[EbayItem]
+    api_calls_used: int
+    risk_scores: list[float]
+    ts: str
+
+
+class WatchCountItem(BaseModel):
+    title: str | None = None
+    watch_count: int | None = None
+    end_date: str | None = None
+    price: float | None = None
+    ebay_url: str | None = None
+    ebay_item_id: str | None = None
+    source: str = "watchcount"
+
+
+class WatchCountSearchResponse(BaseModel):
+    query: str
+    marketplace: str
+    total_items: int
+    items: list[WatchCountItem]
+    tool_used: str
+    recaptcha_detected: bool = False
+    ts: str
+
+
+class TwoememainItem(BaseModel):
+    title: str | None = None
+    price: EbayPrice | None = None  # CSV-compatible avec EbayItem
+    start_date: str | None = None   # date de publication
+    end_date: str | None = None
+    photo_url: str | None = None
+    link: str | None = None
+    location: str | None = None
+    source: str = "2ememain"
+
+
+class TwoememainSearchResponse(BaseModel):
+    query: str
+    total_items: int
+    items: list[TwoememainItem]
+    tool_used: str
+    blocked: bool = False
+    error: str | None = None
+    ts: str
+
+
+class AggregatedItem(BaseModel):
+    title: str | None = None
+    price: EbayPrice | None = None
+    epid: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    photo_url: str | None = None
+    link: str | None = None
+    location: str | None = None
+    source: str  # "ebay" | "2ememain"
+
+
+class AggregateSearchResponse(BaseModel):
+    query: str
+    marketplace: str
+    total_items: int
+    items: list[AggregatedItem]
+    sources: dict[str, int]       # {"ebay": N, "2ememain": M}
+    duplicates_removed: int
+    ebay_blocked: bool = False
+    twoememain_blocked: bool = False
+    ts: str
+
+
+class EpidStats(BaseModel):
+    epid: str
+    brand: str | None = None
+    model: str | None = None
+    total_items: int = 0
+    currency: str | None = None
+    median_price: float | None = None
+    q1_price: float | None = None
+    q2_price: float | None = None
+    q3_price: float | None = None
+    q4_price: float | None = None
+    avg_sell_days: float | None = None
+    min_sell_days: float | None = None
+    max_sell_days: float | None = None
+    sell_days_sample: int = 0
+    last_updated: str | None = None
+
+
+class IngestRequest(BaseModel):
+    items: list[dict]
+    source: str = "unknown"
+
+
+class IngestResponse(BaseModel):
+    ingested: int
+    epids_updated: int

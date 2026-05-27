@@ -141,4 +141,5 @@ def test_iso_now_format():
 # ---------- _SPIDERS registry ------------------------------------------
 
 def test_spiders_registry_contains_both():
-    assert set(run_scrapy._SPIDERS) == {"api_json", "adaptive"}
+    assert {"api_json", "adaptive"}.issubset(set(run_scrapy._SPIDERS))
+    assert "ebay_browse" in run_scrapy._SPIDERS
