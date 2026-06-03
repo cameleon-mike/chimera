@@ -213,7 +213,7 @@ async def capabilities():
     No auth: this is read-only metadata about what chimera can do. The actual
     job-submission endpoints below require Bearer auth.
     """
-    return mf.load_manifest()
+    return {"schema_version": "1.0", **mf.load_manifest()}
 
 
 @app.post("/run-tool", response_model=RunToolResponse, tags=["jobs"])
