@@ -1,0 +1,15 @@
+{
+  "site": "vinted.fr",
+  "version": "1.0",
+  "baseSelector": "div[data-testid='item-card']",
+  "fields": [
+    {"name": "listing_id", "selector": "a", "type": "attribute", "attribute": "href", "transform": "extract_id_from_url"},
+    {"name": "title", "selector": "[data-testid='item-title']", "type": "text"},
+    {"name": "price_raw", "selector": "[data-testid='item-price'] span", "type": "text"},
+    {"name": "brand", "selector": "[data-testid='item-brand']", "type": "text"},
+    {"name": "size", "selector": "[data-testid='item-size']", "type": "text"},
+    {"name": "condition", "selector": "[data-testid='item-condition']", "type": "text"},
+    {"name": "url", "selector": "a", "type": "attribute", "attribute": "href"},
+    {"name": "photo_url", "selector": "img", "type": "attribute", "attribute": "src"}
+  ]
+}

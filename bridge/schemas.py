@@ -260,6 +260,16 @@ class AggregatedItem(BaseModel):
     source: str  # "ebay" | "2ememain"
 
 
+class VintedSearchResponse(BaseModel):
+    query: str
+    marketplace: str
+    total_items: int
+    items: list[AggregatedItem]
+    blocked: bool = False
+    tool_used: str = "scrapy"
+    ts: str
+
+
 class AggregateSearchResponse(BaseModel):
     query: str
     marketplace: str

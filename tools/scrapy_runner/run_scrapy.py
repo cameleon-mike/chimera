@@ -73,6 +73,7 @@ from tools.scrapy_runner.project.spiders.adaptive import AdaptiveSpider
 from tools.scrapy_runner.project.spiders.api_json import ApiJsonSpider
 from tools.scrapy_runner.project.spiders.ebay_browse import EbayBrowseSpider
 from tools.scrapy_runner.project.spiders.vinted_2ememain import DeuxememainSpider
+from tools.scrapy_runner.project.spiders.vinted_spider import VintedSpider
 from tools.scrapy_runner.project.spiders.watchcount import WatchCountSpider
 
 import re
@@ -85,6 +86,7 @@ _SPIDERS = {
     "ebay_browse": EbayBrowseSpider,
     "watchcount": WatchCountSpider,
     "2ememain": DeuxememainSpider,
+    "vinted": VintedSpider,
 }
 
 _SCRAPY_SETTINGS_WHITELIST = {
@@ -305,6 +307,14 @@ def main(argv: list[str] | None = None) -> int:
     if spider_name == "2ememain":
         spider_kwargs["q"] = config.get("q", "")
         spider_kwargs["max_pages"] = int(config.get("max_pages", 3))
+
+    if spider_name == "vinted":
+        from bridge.config import get_settings as _get_bridge_settings_v
+        _bsv = _get_bridge_settings_v()
+        spider_kwargs["q"] = config.get("q", "")
+        spider_kwargs["marketplace"] = config.get("marketplace", "FR")
+        spider_kwargs["max_pages"] = int(config.get("max_pages", 3))
+        spider_kwargs["groq_api_key"] = config.get("groq_api_key") or getattr(_bsv, "groq_api_key", "")
 
     process = CrawlerProcess(settings=settings, install_root_handler=False)
     crawler = process.create_crawler(SpiderCls)

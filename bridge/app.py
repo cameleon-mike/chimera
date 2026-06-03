@@ -48,6 +48,7 @@ from .schemas import (
     StatusResponse,
     TwoememainItem,
     TwoememainSearchResponse,
+    VintedSearchResponse,
     WatchCountItem,
     WatchCountSearchResponse,
 )
@@ -1024,6 +1025,96 @@ async def search_2ememain(
             tool_used="escalation_error",
             blocked=True,
             error=str(exc),
+            ts=datetime.now(timezone.utc).isoformat(),
+        )
+
+
+# --- Vinted search endpoint ---------------------------------------------------
+
+
+@app.get("/vinted/search", response_model=VintedSearchResponse, tags=["vinted"])
+async def vinted_search(
+    q: str,
+    marketplace: str = "FR",
+    max_pages: int = 3,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> VintedSearchResponse:
+    """Synchronous Vinted search via Scrapy spider + Universal Extractor. Auth Bearer required."""
+    import asyncio
+    from datetime import datetime, timezone
+    from .workers import _run_scrapy_subprocess
+
+    job_id = uuid.uuid4().hex[:16]
+    url = f"https://www.vinted.fr/catalog?search_text={q}&order=newest_first"
+    config = {
+        "spider": "vinted",
+        "q": q,
+        "marketplace": marketplace,
+        "max_pages": max_pages,
+        "respect_robots": False,
+        "groq_api_key": getattr(settings, "groq_api_key", ""),
+    }
+
+    try:
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(_run_scrapy_subprocess, job_id, url, config),
+                timeout=120.0,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Vinted search timed out after 120s")
+
+        raw_items = result.get("items", [])
+        blocked = result.get("_meta", {}).get("blocked", False)
+        tool_used = "scrapy"
+
+        if blocked:
+            return VintedSearchResponse(
+                query=q,
+                marketplace=marketplace,
+                total_items=0,
+                items=[],
+                blocked=True,
+                tool_used="escalation_error",
+                ts=datetime.now(timezone.utc).isoformat(),
+            )
+
+        items = []
+        for raw in raw_items:
+            price_eur = raw.get("price_eur")
+            price = EbayPrice(value=price_eur, currency="EUR") if price_eur else None
+            items.append(AggregatedItem(
+                title=raw.get("title"),
+                price=price,
+                epid=None,
+                start_date=None,
+                end_date=None,
+                photo_url=raw.get("photo_url"),
+                link=raw.get("url"),
+                source="vinted",
+            ))
+
+        return VintedSearchResponse(
+            query=q,
+            marketplace=marketplace,
+            total_items=len(items),
+            items=items,
+            blocked=False,
+            tool_used=tool_used,
+            ts=datetime.now(timezone.utc).isoformat(),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("vinted_unhandled_error: %s", repr(exc), exc_info=True)
+        return VintedSearchResponse(
+            query=q,
+            marketplace=marketplace,
+            total_items=0,
+            items=[],
+            blocked=True,
+            tool_used="escalation_error",
             ts=datetime.now(timezone.utc).isoformat(),
         )
 

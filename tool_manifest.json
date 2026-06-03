@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.7.5",
+  "manifest_version": "0.7.6",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -44,7 +44,8 @@
           "enum": [
             "api_json",
             "adaptive",
-            "ebay_browse"
+            "ebay_browse",
+            "vinted"
           ],
           "default": "api_json",
           "description": "Which built-in spider to run. api_json for JSON APIs (light parsing); adaptive for HTML pages driven by CSS selectors."
@@ -524,6 +525,7 @@
     "GET  /watchcount/search": "WatchCount.com search — watch count + end_date. Scrapy first, Screenshot+Groq Vision fallback. Auth required.",
     "GET  /2ememain/search": "2ememain.be classified ads search. Returns items CSV-compatible with eBay. Auth required.",
     "GET  /ebay/search": "Synchronous eBay Browse API search. Returns items[]. Auth required.",
+    "GET  /vinted/search": "Vinted.fr listings search via Scrapy spider + Universal Extractor (CSS→LLM cascade). Returns AggregatedItem list with source='vinted'. Auth required.",
     "GET  /risk/{domain}": "Aggregated risk history for a domain.",
     "GET  /capabilities": "This manifest, served live.",
     "GET  /health": "Liveness probe.",
