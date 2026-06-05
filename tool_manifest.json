@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.7.6",
+  "manifest_version": "0.7.7",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -450,6 +450,22 @@
         "description": "Search term for /epid/search (LIKE match on brand or model). Required.",
         "required": true
       }
+    }
+  },
+  "flipmachine_e2e": {
+    "description": "End-to-end validation pipeline for FLIPMACHINE scoring. Validates that Chimera data feeds SecondPulse correctly for the 3 MVP test products.",
+    "implemented_in_step": "5.1",
+    "test_products": [
+      "wacom cintiq 16",
+      "gopro hero",
+      "steelseries apex pro tkl"
+    ],
+    "marketplace": "EBAY_FR",
+    "cron_interval_minutes": 360,
+    "last_e2e_run": null,
+    "scripts": {
+      "e2e": "scripts/flipmachine_e2e.py",
+      "cron": "scripts/scrape_cron.py"
     }
   },
   "proxy_tiers": {
