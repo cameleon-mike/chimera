@@ -308,3 +308,37 @@ class IngestRequest(BaseModel):
 class IngestResponse(BaseModel):
     ingested: int
     epids_updated: int
+
+
+class FlipScoreResponse(BaseModel):
+    epid: str
+    listed_price: float
+    market_median: float | None
+    decision: str
+    confidence: float
+    price_ratio: float | None
+    margin_eur: float | None
+    margin_pct: float | None
+    velocity_flag: str
+    reasoning: str
+
+
+class DealItem(BaseModel):
+    epid: str
+    title: str | None = None
+    listed_price: float
+    link: str | None = None
+    decision: str
+    confidence: float
+    price_ratio: float | None = None
+    margin_eur: float | None = None
+    margin_pct: float | None = None
+    velocity_flag: str
+    reasoning: str
+
+
+class DealsResponse(BaseModel):
+    query: str
+    total_scored: int
+    deals_found: int
+    deals: list[DealItem]

@@ -27,6 +27,8 @@ from .schemas import (
     AggregateSearchResponse,
     AggregatedItem,
     DailyRunResponse,
+    DealItem,
+    DealsResponse,
     EbayItem,
     EbayPrice,
     EbaySearchResponse,
@@ -34,6 +36,7 @@ from .schemas import (
     EscalateRequest,
     EscalateResponse,
     FactoryStatsResponse,
+    FlipScoreResponse,
     HealthResponse,
     IngestRequest,
     IngestResponse,
@@ -1390,3 +1393,180 @@ async def search_epid(
         )
         for r in rows
     ]
+
+
+# --- FLIPMACHINE decision agent endpoints ------------------------------------
+
+
+@app.get("/flipmachine/score", response_model=FlipScoreResponse, tags=["flipmachine"])
+async def flipmachine_score(
+    epid: str,
+    price: float,
+    shipping: float = 15.0,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> FlipScoreResponse:
+    """Score a single item against market data for given ePID."""
+    from tools.decision_agent.scorer import FlipScorer
+
+    conn = _get_epid_conn()
+    try:
+        cur = conn.execute(
+            """
+            SELECT epid, brand, model, total_items, currency,
+                   median_price, q1_price, q2_price, q3_price, q4_price,
+                   avg_sell_days, min_sell_days, max_sell_days, sell_days_sample,
+                   last_updated
+            FROM epid_stats WHERE epid = ?
+            """,
+            (epid,),
+        )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"ePID {epid!r} not found")
+
+    epid_dict = {
+        "epid": row[0], "brand": row[1], "model": row[2], "total_items": row[3],
+        "currency": row[4], "median_price": row[5], "q1_price": row[6],
+        "q2_price": row[7], "q3_price": row[8], "q4_price": row[9],
+        "avg_sell_days": row[10], "min_sell_days": row[11], "max_sell_days": row[12],
+        "sell_days_sample": row[13], "last_updated": row[14],
+    }
+
+    scorer = FlipScorer(shipping_estimate=shipping)
+    result = scorer.score(price, epid_dict)
+
+    return FlipScoreResponse(
+        epid=epid,
+        listed_price=price,
+        market_median=epid_dict.get("median_price"),
+        **result,
+    )
+
+
+@app.get("/flipmachine/deals", response_model=DealsResponse, tags=["flipmachine"])
+async def flipmachine_deals(
+    q: str,
+    marketplace: str = "EBAY_FR",
+    max_price: float | None = None,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> DealsResponse:
+    """Find buy/offer deals for a search query by scoring against market data."""
+    import asyncio
+    from .aggregator import deduplicate, fetch_2ememain_raw, fetch_ebay_raw
+    from tools.decision_agent.scorer import FlipScorer
+
+    ebay_result, deux_result = await asyncio.gather(
+        fetch_ebay_raw(q, marketplace, 3, settings),
+        fetch_2ememain_raw(q, 3),
+    )
+
+    # Normalise eBay items
+    ebay_items = []
+    for raw in ebay_result.get("items", []):
+        price_data = raw.get("price")
+        price = EbayPrice(**price_data) if isinstance(price_data, dict) else None
+        ebay_items.append(AggregatedItem(
+            title=raw.get("title"),
+            price=price,
+            epid=raw.get("epid"),
+            start_date=raw.get("start_date"),
+            end_date=raw.get("end_date"),
+            photo_url=raw.get("photo_url"),
+            link=raw.get("link"),
+            source="ebay",
+        ))
+
+    # Normalise 2ememain items
+    deux_items = []
+    for raw in deux_result.get("items", []):
+        price_data = raw.get("price")
+        price = EbayPrice(**price_data) if isinstance(price_data, dict) else None
+        deux_items.append(AggregatedItem(
+            title=raw.get("title"),
+            price=price,
+            epid=raw.get("epid"),
+            start_date=raw.get("start_date"),
+            end_date=raw.get("end_date"),
+            photo_url=raw.get("photo_url"),
+            link=raw.get("link"),
+            source="2ememain",
+        ))
+
+    merged, _ = deduplicate(ebay_items, deux_items)
+
+    # Optional max_price filter
+    if max_price is not None:
+        merged = [
+            it for it in merged
+            if it.price and it.price.value is not None and it.price.value <= max_price
+        ]
+
+    # Collect items with epid and valid price
+    scoreable = [
+        it for it in merged
+        if it.epid and it.price and it.price.value and it.price.value > 0
+    ]
+
+    if not scoreable:
+        return DealsResponse(query=q, total_scored=0, deals_found=0, deals=[])
+
+    # Batch lookup epid_stats
+    unique_epids = list({it.epid for it in scoreable})
+    placeholders = ",".join("?" * len(unique_epids))
+    conn = _get_epid_conn()
+    stats_by_epid: dict[str, dict] = {}
+    try:
+        cur = conn.execute(
+            f"""
+            SELECT epid, brand, model, total_items, currency,
+                   median_price, q1_price, q2_price, q3_price, q4_price,
+                   avg_sell_days, min_sell_days, max_sell_days, sell_days_sample,
+                   last_updated
+            FROM epid_stats WHERE epid IN ({placeholders})
+            """,
+            unique_epids,
+        )
+        for row in cur.fetchall():
+            stats_by_epid[row[0]] = {
+                "epid": row[0], "brand": row[1], "model": row[2],
+                "total_items": row[3], "currency": row[4],
+                "median_price": row[5], "q1_price": row[6], "q2_price": row[7],
+                "q3_price": row[8], "q4_price": row[9], "avg_sell_days": row[10],
+                "min_sell_days": row[11], "max_sell_days": row[12],
+                "sell_days_sample": row[13], "last_updated": row[14],
+            }
+    finally:
+        conn.close()
+
+    scorer = FlipScorer()
+    deals: list[DealItem] = []
+    total_scored = 0
+
+    for item in scoreable:
+        stats = stats_by_epid.get(item.epid)
+        if not stats:
+            continue
+        total_scored += 1
+        result = scorer.score(item.price.value, stats)
+        if result["decision"] in ("BUY", "OFFER"):
+            deals.append(DealItem(
+                epid=item.epid,
+                title=item.title,
+                listed_price=item.price.value,
+                link=item.link,
+                decision=result["decision"],
+                confidence=result["confidence"],
+                price_ratio=result["price_ratio"],
+                margin_eur=result["margin_eur"],
+                margin_pct=result["margin_pct"],
+                velocity_flag=result["velocity_flag"],
+                reasoning=result["reasoning"],
+            ))
+
+    deals.sort(key=lambda d: d.confidence, reverse=True)
+    deals = deals[:10]
+
+    return DealsResponse(query=q, total_scored=total_scored, deals_found=len(deals), deals=deals)
