@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.7.8",
+  "manifest_version": "0.7.9",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -482,6 +482,11 @@
       "e2e": "scripts/flipmachine_e2e.py",
       "cron": "scripts/scrape_cron.py"
     }
+  },
+  "scraping_agent": {
+    "schedule_hours": 6,
+    "watchcount_daily_hour": 2,
+    "products_watch": ["wacom cintiq 16", "gopro hero", "steelseries apex pro tkl"]
   },
   "proxy_tiers": {
     "datacenter": {
