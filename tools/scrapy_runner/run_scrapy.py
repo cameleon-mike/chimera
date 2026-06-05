@@ -89,6 +89,8 @@ _SPIDERS = {
     "vinted": VintedSpider,
 }
 
+_URL_OPTIONAL_SPIDERS = {"vinted", "watchcount", "2ememain"}
+
 _SCRAPY_SETTINGS_WHITELIST = {
     "DOWNLOAD_DELAY",
     "CONCURRENT_REQUESTS",
@@ -142,20 +144,22 @@ def _read_input(argv) -> dict[str, Any]:
 
 
 def _validate(payload: dict[str, Any]) -> tuple[list[str], str, dict[str, Any], str]:
-    url = payload.get("url")
-    if isinstance(url, str):
-        urls = [url]
-    elif isinstance(url, list) and url and all(isinstance(u, str) for u in url):
-        urls = url
-    else:
-        print(json.dumps({"error": "url_required"}), file=sys.stderr)
-        sys.exit(2)
-
     config = payload.get("config") or {}
     spider_name = config.get("spider") or payload.get("spider") or "api_json"
     if spider_name not in _SPIDERS:
         print(json.dumps({"error": "unknown_spider", "spider": spider_name,
                           "available": sorted(_SPIDERS)}), file=sys.stderr)
+        sys.exit(2)
+
+    url = payload.get("url")
+    if spider_name in _URL_OPTIONAL_SPIDERS:
+        urls = [url] if isinstance(url, str) else (url if isinstance(url, list) else [])
+    elif isinstance(url, str):
+        urls = [url]
+    elif isinstance(url, list) and url and all(isinstance(u, str) for u in url):
+        urls = url
+    else:
+        print(json.dumps({"error": "url_required"}), file=sys.stderr)
         sys.exit(2)
 
     job_id = payload.get("job_id") or secrets.token_hex(8)
@@ -316,6 +320,13 @@ def main(argv: list[str] | None = None) -> int:
         spider_kwargs["max_pages"] = int(config.get("max_pages", 3))
         spider_kwargs["groq_api_key"] = config.get("groq_api_key") or getattr(_bsv, "groq_api_key", "")
 
+    # FIX 2 — default PROXY_TIER for URL-less spiders
+    if spider_name in _URL_OPTIONAL_SPIDERS and not settings.get("PROXY_TIER"):
+        settings.set("PROXY_TIER", config.get("proxy_tier", "residential"), priority="cmdline")
+    # FIX 3 — explicit use_residential flag always wins
+    if config.get("use_residential"):
+        settings.set("PROXY_TIER", "residential", priority="cmdline")
+
     process = CrawlerProcess(settings=settings, install_root_handler=False)
     crawler = process.create_crawler(SpiderCls)
     process.crawl(crawler, **spider_kwargs)
@@ -339,7 +350,7 @@ def main(argv: list[str] | None = None) -> int:
 
     result = {
         "tool": "scrapy",
-        "url": payload["url"],  # echo exactly what was sent in
+        "url": payload.get("url"),  # echo exactly what was sent in
         "http_status": final_status,
         "proxy": config.get("proxy"),
         "risk_score": max(scores) if scores else 0.0,

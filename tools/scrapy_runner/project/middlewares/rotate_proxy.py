@@ -46,6 +46,7 @@ class RotateProxyMiddleware:
             proxy_url = proxy["url"] if proxy else None
         if proxy_url:
             request.meta["proxy"] = proxy_url
+            request.meta["dont_verify_ssl"] = True
         return None
 
     def process_response(self, request: Request, response: Response, spider: Spider):
