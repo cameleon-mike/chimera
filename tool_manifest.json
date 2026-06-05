@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.7.7",
+  "manifest_version": "0.7.8",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -373,6 +373,21 @@
           "EBAY_NL"
         ],
         "default": "EBAY_FR"
+      }
+    },
+    "response_schema": {
+      "tool_used": {
+        "type": "string",
+        "enum": ["scrapy", "screenshot+vision", "screenshot_only", "screenshot_failed", "escalation_timeout", "escalation_error"],
+        "description": "Which extraction method was used. screenshot+vision = Playwright screenshot → Groq Vision sold-items extraction."
+      },
+      "recaptcha_detected": {
+        "type": "boolean",
+        "description": "True if reCAPTCHA was detected on the Scrapy attempt."
+      },
+      "items[].end_date": {
+        "type": "string",
+        "description": "Sold date in ISO YYYY-MM-DD format. Used to populate avg_sell_days in epid_stats."
       }
     }
   },

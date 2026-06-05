@@ -686,6 +686,33 @@ async def ebay_search(
 
 # --- WatchCount endpoint ------------------------------------------------------
 
+
+def _ingest_sold_dates(items_raw: list[dict]) -> None:
+    """Best-effort ingest of sold dates from vision items into scraped_items."""
+    try:
+        from tools.stats.epid_calculator import recompute_all_stats
+        conn = _get_epid_conn()
+        updated_any = False
+        for item in items_raw:
+            title = item.get("title")
+            end_date = item.get("end_date")
+            if not title or not end_date:
+                continue
+            title_prefix = title[:40]
+            conn.execute(
+                "UPDATE scraped_items SET end_date = ? WHERE title LIKE ? AND end_date IS NULL",
+                (end_date, f"%{title_prefix}%"),
+            )
+            if conn.total_changes > 0:
+                updated_any = True
+        conn.commit()
+        if updated_any:
+            recompute_all_stats(conn)
+        conn.close()
+    except Exception as exc:
+        logger.warning("ingest_sold_dates_error: %s", repr(exc))
+
+
 _WATCHCOUNT_MARKETPLACE_LANG: dict[str, str] = {
     "EBAY_FR": "fr",
     "EBAY_DE": "de",
@@ -757,9 +784,13 @@ async def watchcount_search(
             png_path = ss_result.get("screenshot_path")
             groq_key = settings.groq_api_key
             if png_path and Path(png_path).exists() and groq_key:
-                from tools.groq_vision.extract_dates import GroqVisionExtractor
-                extractor = GroqVisionExtractor(groq_key)
-                items_raw = extractor.extract_items(png_path, query=q)
+                from tools.vision_agent.extract_sold_dates import SoldDateExtractor
+                extractor = SoldDateExtractor(groq_key)
+                items_raw = extractor.extract_from_screenshot(png_path)
+                tool_used = "screenshot+vision"
+                # Ingest sold dates into epid_stats (best-effort, never crashes)
+                if items_raw:
+                    _ingest_sold_dates(items_raw)
             elif not groq_key:
                 logger.warning("watchcount_groq_key_missing — screenshot taken but no vision extraction")
                 tool_used = "screenshot_only"
