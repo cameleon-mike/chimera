@@ -342,3 +342,28 @@ class DealsResponse(BaseModel):
     total_scored: int
     deals_found: int
     deals: list[DealItem]
+
+
+class NavigatorRunRequest(BaseModel):
+    query: str = Field(..., description="Search query")
+    max_price: float | None = Field(default=None, description="Maximum price filter in EUR")
+    marketplace: str = Field(default="EBAY_FR", description="Marketplace ID")
+
+
+class NavigatorRunResponse(BaseModel):
+    query: str
+    pipeline_ms: int
+    probe_risk: float
+    total_scraped: int
+    total_scored: int
+    deals: list[dict]
+    summary: str
+
+
+class DashboardResponse(BaseModel):
+    bridge: dict
+    jobs: dict
+    scraping: dict
+    scoring: dict
+    profiles: dict
+    proxy: dict

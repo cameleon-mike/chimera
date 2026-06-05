@@ -41,6 +41,8 @@ from .schemas import (
     IngestRequest,
     IngestResponse,
     JobStatus,
+    NavigatorRunRequest,
+    NavigatorRunResponse,
     ProfileCreateRequest,
     ProfileResponse,
     ProbeResponse,
@@ -59,6 +61,7 @@ from tools.common.domain_validator import validate_fqdn
 
 logger = setup_logging()
 settings = get_settings()
+_BRIDGE_START_TIME = time.time()
 
 _RISK_DB_PATH = Path(__file__).parent.parent / "storage" / "risk_db.sqlite"
 
@@ -1570,3 +1573,128 @@ async def flipmachine_deals(
     deals = deals[:10]
 
     return DealsResponse(query=q, total_scored=total_scored, deals_found=len(deals), deals=deals)
+
+
+# --- Navigator agent endpoint -------------------------------------------------
+
+
+@app.post("/navigator/run", response_model=NavigatorRunResponse, tags=["navigator"])
+async def navigator_run(
+    req: NavigatorRunRequest,
+    _token: Annotated[str, Depends(require_bearer)],
+) -> NavigatorRunResponse:
+    """Orchestrate full FLIPMACHINE pipeline: probe → scrape → score → top deals."""
+    import asyncio
+
+    from tools.navigator_agent.navigator import NavigatorAgent
+
+    nav = NavigatorAgent(settings=settings, db_path=_RISK_DB_PATH)
+    result = await asyncio.to_thread(nav.run, req.query, req.max_price, req.marketplace)
+    return NavigatorRunResponse(**result)
+
+
+# --- Dashboard endpoint -------------------------------------------------------
+
+
+@app.get("/dashboard", tags=["meta"])
+async def dashboard(
+    _token: Annotated[str, Depends(require_bearer)],
+):
+    """Internal state of all Chimera subsystems — for monitoring and debugging."""
+    from datetime import datetime, timezone
+
+    uptime_seconds = int(time.time() - _BRIDGE_START_TIME)
+
+    # Jobs from Redis (best-effort — never crashes if Redis is down)
+    jobs_queued = 0
+    jobs_active = 0
+    failed_last_hour = 0
+    try:
+        from rq import Queue
+        from rq.registry import FailedJobRegistry, StartedJobRegistry
+        from rq.job import Job
+
+        redis_conn = q._redis_conn()
+        for qname in ["high", "normal", "low"]:
+            rq_queue = Queue(qname, connection=redis_conn)
+            jobs_queued += rq_queue.count
+            sreg = StartedJobRegistry(qname, connection=redis_conn)
+            jobs_active += len(sreg)
+            freg = FailedJobRegistry(qname, connection=redis_conn)
+            for job_id in freg.get_job_ids():
+                try:
+                    job_obj = Job.fetch(job_id, connection=redis_conn)
+                    if job_obj.ended_at:
+                        ended = job_obj.ended_at
+                        if ended.tzinfo is None:
+                            ended = ended.replace(tzinfo=timezone.utc)
+                        age_s = (datetime.now(timezone.utc) - ended).total_seconds()
+                        if age_s < 3600:
+                            failed_last_hour += 1
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # SQLite stats (best-effort)
+    total_items = 0
+    epids_tracked = 0
+    last_scrape = None
+    profile_counts = {"creating": 0, "warming": 0, "ready": 0, "senior": 0, "recycle": 0}
+
+    try:
+        conn_db = sqlite3.connect(str(_RISK_DB_PATH))
+        try:
+            row = conn_db.execute(
+                "SELECT COUNT(*), MAX(scraped_at) FROM scraped_items"
+            ).fetchone()
+            total_items = row[0] or 0
+            last_scrape = row[1]
+
+            epids_tracked = (
+                conn_db.execute("SELECT COUNT(*) FROM epid_stats").fetchone()[0] or 0
+            )
+
+            for status_row in conn_db.execute(
+                "SELECT status, COUNT(*) FROM profiles GROUP BY status"
+            ).fetchall():
+                if status_row[0] in profile_counts:
+                    profile_counts[status_row[0]] = status_row[1]
+        finally:
+            conn_db.close()
+    except Exception:
+        pass
+
+    residential_configured = bool(
+        getattr(settings, "brightdata_username", "")
+        and getattr(settings, "brightdata_password", "")
+    )
+
+    return {
+        "bridge": {
+            "version": __version__,
+            "uptime_seconds": uptime_seconds,
+            "status": "ok",
+        },
+        "jobs": {
+            "queued": jobs_queued,
+            "active": jobs_active,
+            "failed_last_hour": failed_last_hour,
+        },
+        "scraping": {
+            "total_items": total_items,
+            "epids_tracked": epids_tracked,
+            "last_scrape": last_scrape,
+        },
+        "scoring": {
+            "total_scored": 0,
+            "deals_buy": 0,
+            "deals_offer": 0,
+            "deals_skip": 0,
+        },
+        "profiles": profile_counts,
+        "proxy": {
+            "residential_configured": residential_configured,
+            "last_test": None,
+        },
+    }

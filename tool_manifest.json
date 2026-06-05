@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.8.0",
+  "manifest_version": "0.8.1",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -331,6 +331,38 @@
           "default": "http://127.0.0.1:8191/v1"
         }
       }
+    },
+    "navigator": {
+      "summary": "Orchestrates full FLIPMACHINE pipeline in one call: probe → scrape → score → top deals.",
+      "implemented_in_step": "5.5",
+      "status": "available",
+      "endpoint": "POST /navigator/run",
+      "synchronous": true,
+      "params": {
+        "query": {
+          "type": "string",
+          "description": "Search query (e.g. 'wacom cintiq 16'). Required.",
+          "required": true
+        },
+        "max_price": {
+          "type": "number",
+          "description": "Maximum listed price in EUR. Optional filter.",
+          "required": false
+        },
+        "marketplace": {
+          "type": "string",
+          "description": "Marketplace ID (e.g. EBAY_FR, EBAY_DE). Default: EBAY_FR.",
+          "default": "EBAY_FR"
+        }
+      }
+    },
+    "dashboard": {
+      "summary": "Internal state of all Chimera subsystems: jobs, scraping stats, profiles, proxy.",
+      "implemented_in_step": "5.5",
+      "status": "available",
+      "endpoint": "GET /dashboard",
+      "synchronous": true,
+      "params": {}
     }
   },
   "account_factory": {
