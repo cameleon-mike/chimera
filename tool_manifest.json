@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.8.2",
+  "manifest_version": "0.8.3",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -12,6 +12,13 @@
     "scheme": "bearer",
     "header": "Authorization",
     "env_var": "BRIDGE_AUTH_TOKEN"
+  },
+  "infrastructure": {
+    "vps": "212.227.185.195",
+    "domain": "shovelos.com",
+    "ssl": "letsencrypt",
+    "cert_expiry": "2026-08-31",
+    "services": ["chimera-bridge", "chimera-worker", "chimera-cron"]
   },
   "tools": {
     "probe": {
