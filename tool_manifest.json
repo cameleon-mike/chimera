@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.8.1",
+  "manifest_version": "0.8.2",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -591,6 +591,12 @@
     "captcha_generic"
   ],
   "endpoints": {
+    "/ui": {
+      "method": "GET",
+      "auth": false,
+      "description": "Chimera web UI — dark terminal interface for monitoring and deal search. Public (no Bearer required). Served as static HTML with Tailwind CDN + Alpine.js.",
+      "implemented_in_step": "5.6"
+    },
     "POST /run-tool": "Enqueue a scraping job. Returns {job_id, status}.",
     "GET  /status/{id}": "Job lifecycle status (queued|started|finished|failed).",
     "GET  /result/{id}": "Structured JSON result for a finished job.",

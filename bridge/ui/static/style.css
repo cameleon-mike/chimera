@@ -1,0 +1,16 @@
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0a0a0a; }
+::-webkit-scrollbar-thumb { background: #d4a253; border-radius: 3px; }
+
+/* Loading spinner */
+.spinner {
+  border: 2px solid #333;
+  border-top: 2px solid #d4a253;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }

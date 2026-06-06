@@ -17,6 +17,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__, manifest as mf
 from .auth import require_bearer
@@ -1698,3 +1699,19 @@ async def dashboard(
             "last_test": None,
         },
     }
+
+
+# --- Static UI -----------------------------------------------------------
+
+_UI_DIR = Path(__file__).parent / "ui"
+_UI_STATIC_DIR = _UI_DIR / "static"
+
+if _UI_STATIC_DIR.exists():
+    app.mount("/ui/static", StaticFiles(directory=str(_UI_STATIC_DIR)), name="ui_static")
+
+
+@app.get("/ui", include_in_schema=False)
+@app.get("/ui/", include_in_schema=False)
+async def serve_ui():
+    """Serve the Chimera web UI (public — no auth required)."""
+    return FileResponse(str(_UI_DIR / "index.html"))
