@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, manifest as mf
@@ -24,6 +24,9 @@ from .auth import require_bearer
 from .config import get_settings
 from .logging_setup import setup_logging, write_audit
 from . import queue as q
+from . import metrics
+from .middleware import PrometheusMiddleware
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from .schemas import (
     AggregateSearchResponse,
     AggregatedItem,
@@ -38,7 +41,6 @@ from .schemas import (
     EscalateResponse,
     FactoryStatsResponse,
     FlipScoreResponse,
-    HealthResponse,
     IngestRequest,
     IngestResponse,
     JobStatus,
@@ -182,6 +184,8 @@ app = FastAPI(
 
 setup_scheduler(app, settings)
 
+app.add_middleware(PrometheusMiddleware)
+
 
 # --- Request logging middleware --------------------------------------
 
@@ -205,14 +209,87 @@ async def log_requests(request: Request, call_next):
 # --- Endpoints -------------------------------------------------------
 
 
-@app.get("/health", response_model=HealthResponse, tags=["meta"])
-async def health() -> HealthResponse:
-    """Liveness probe — no auth. Returns manifest + bridge versions."""
-    return HealthResponse(
-        status="ok",
-        manifest_version=mf.manifest_version(),
-        bridge_version=__version__,
+@app.get("/health", tags=["meta"])
+async def health():
+    """Enriched liveness/readiness probe — no auth.
+
+    Returns per-subsystem checks. Global status is 'degraded' if any check
+    reports 'error'.
+    """
+    checks: dict = {}
+    metrics_block = {"total_items_scraped": 0, "epids_tracked": 0, "profiles_ready": 0}
+
+    # Redis
+    try:
+        _start = time.perf_counter()
+        q._redis_conn().ping()
+        checks["redis"] = {
+            "status": "ok",
+            "latency_ms": round((time.perf_counter() - _start) * 1000, 1),
+        }
+    except Exception:
+        checks["redis"] = {"status": "error", "latency_ms": None}
+
+    # SQLite
+    try:
+        conn = sqlite3.connect(str(_RISK_DB_PATH))
+        try:
+            tables = conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
+            ).fetchone()[0]
+            row = conn.execute(
+                "SELECT COUNT(*), MAX(scraped_at) FROM scraped_items"
+            ).fetchone()
+            total_items = row[0] or 0
+            last_scrape = row[1]
+            epids = conn.execute("SELECT COUNT(*) FROM epid_stats").fetchone()[0] or 0
+            ready = (
+                conn.execute(
+                    "SELECT COUNT(*) FROM profiles WHERE status='ready'"
+                ).fetchone()[0]
+                or 0
+            )
+            checks["sqlite"] = {"status": "ok", "tables": tables}
+            checks["scraper"] = {"status": "ok", "last_scrape": last_scrape}
+            metrics_block = {
+                "total_items_scraped": total_items,
+                "epids_tracked": epids,
+                "profiles_ready": ready,
+            }
+        finally:
+            conn.close()
+    except Exception:
+        checks["sqlite"] = {"status": "error", "tables": 0}
+        checks["scraper"] = {"status": "error", "last_scrape": None}
+
+    # Proxy (config only)
+    residential = bool(
+        getattr(settings, "brightdata_username", "")
+        and getattr(settings, "brightdata_password", "")
     )
+    checks["proxy"] = {
+        "status": "configured" if residential else "unconfigured",
+        "residential": residential,
+    }
+
+    degraded = any(c.get("status") == "error" for c in checks.values())
+
+    return {
+        "status": "degraded" if degraded else "ok",
+        "manifest_version": mf.manifest_version(),
+        "bridge_version": __version__,
+        "schema_version": "1.0",
+        "uptime_seconds": int(time.time() - _BRIDGE_START_TIME),
+        "checks": checks,
+        "metrics": metrics_block,
+    }
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics_endpoint():
+    """Prometheus scrape endpoint — no auth (standard Prometheus convention)."""
+    metrics.collect_runtime_gauges()
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/capabilities", tags=["meta"])

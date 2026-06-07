@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.8.3",
+  "manifest_version": "0.8.4",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -618,7 +618,8 @@
     "GET  /vinted/search": "Vinted.fr listings search. Default tool=crawl4ai (JS render → markdown → LLM extraction); tool=scrapy fallback. Returns AggregatedItem list with source='vinted'. Auth required.",
     "GET  /risk/{domain}": "Aggregated risk history for a domain.",
     "GET  /capabilities": "This manifest, served live.",
-    "GET  /health": "Liveness probe.",
+    "GET  /health": "Enriched liveness/readiness probe — per-subsystem checks (redis, sqlite, scraper, proxy). status=degraded if any check fails. No auth.",
+    "GET  /metrics": "Prometheus scrape endpoint — text/plain exposition format. No auth (standard Prometheus convention)",
     "GET /aggregate/search": "Multi-source aggregator — parallel eBay + 2ememain, fuzzy dedup, unified CSV with source column. Auth required.",
     "GET  /epid/stats/{epid}": "Full ePID stats sheet: price quartiles + avg_sell_days. 404 if unknown.",
     "POST /epid/ingest": "Ingest scraped items into scraped_items table; recompute ePID stats. Body: {items, source}.",
