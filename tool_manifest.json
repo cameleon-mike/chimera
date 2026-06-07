@@ -615,7 +615,7 @@
     "GET  /watchcount/search": "WatchCount.com search — watch count + end_date. Scrapy first, Screenshot+Groq Vision fallback. Auth required.",
     "GET  /2ememain/search": "2ememain.be classified ads search. Returns items CSV-compatible with eBay. Auth required.",
     "GET  /ebay/search": "Synchronous eBay Browse API search. Returns items[]. Auth required.",
-    "GET  /vinted/search": "Vinted.fr listings search via Scrapy spider + Universal Extractor (CSS→LLM cascade). Returns AggregatedItem list with source='vinted'. Auth required.",
+    "GET  /vinted/search": "Vinted.fr listings search. Default tool=crawl4ai (JS render → markdown → LLM extraction); tool=scrapy fallback. Returns AggregatedItem list with source='vinted'. Auth required.",
     "GET  /risk/{domain}": "Aggregated risk history for a domain.",
     "GET  /capabilities": "This manifest, served live.",
     "GET  /health": "Liveness probe.",

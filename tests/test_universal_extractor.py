@@ -128,6 +128,20 @@ def test_normalize_price_unparseable():
     assert ex._normalize_price("gratuit") is None
 
 
+def test_normalize_price_numeric_input():
+    """LLM fallback may return price_raw as int/float — must not raise."""
+    ex = make_extractor()
+    assert ex._normalize_price(25.0) == pytest.approx(25.0)
+    assert ex._normalize_price(25) == pytest.approx(25.0)
+
+
+def test_build_item_numeric_price_raw():
+    """_build_item tolerates a numeric price_raw without raising."""
+    ex = make_extractor()
+    item = ex._build_item({"title": "Wacom", "price_raw": 85.0, "url": "/items/1"})
+    assert item["price_eur"] == pytest.approx(85.0)
+
+
 # --- _normalize_condition ---
 
 def test_normalize_condition_all_cases():

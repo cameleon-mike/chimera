@@ -136,11 +136,16 @@ class UniversalExtractor:
         except Exception as e:
             logger.warning("schema_repair_failed", error=str(e))
 
-    def _normalize_price(self, raw: str) -> float | None:
-        """Parse price strings like '25,00 €', '25.00 EUR', '25.00' → float."""
-        if not raw:
+    def _normalize_price(self, raw) -> float | None:
+        """Parse price strings like '25,00 €', '25.00 EUR', '25.00' → float.
+
+        The LLM fallback sometimes returns price_raw already as a number, so
+        accept int/float directly and coerce everything else via str()."""
+        if raw is None or raw == "":
             return None
-        cleaned = re.sub(r"[€EUReur\s]", "", raw.replace(",", "."))
+        if isinstance(raw, (int, float)):
+            return float(raw)
+        cleaned = re.sub(r"[€EUReur\s]", "", str(raw).replace(",", "."))
         m = re.search(r"[\d.]+", cleaned)
         if m:
             try:

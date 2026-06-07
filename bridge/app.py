@@ -65,6 +65,7 @@ settings = get_settings()
 _BRIDGE_START_TIME = time.time()
 
 _RISK_DB_PATH = Path(__file__).parent.parent / "storage" / "risk_db.sqlite"
+_VINTED_SCHEMA_PATH = str(Path(__file__).parent.parent / "tools" / "extractors" / "schemas" / "vinted_fr.json")
 
 
 def _init_risk_db() -> None:
@@ -1075,38 +1076,90 @@ async def vinted_search(
     q: str,
     marketplace: str = "FR",
     max_pages: int = 3,
+    tool: str = "crawl4ai",
     _token: Annotated[str, Depends(require_bearer)] = ...,
 ) -> VintedSearchResponse:
-    """Synchronous Vinted search via Scrapy spider + Universal Extractor. Auth Bearer required."""
+    """Synchronous Vinted search. Default tool=crawl4ai (Vinted is JS-heavy and
+    Scrapy sees an empty initial HTML); tool=scrapy is a fallback. Auth Bearer required."""
     import asyncio
     from datetime import datetime, timezone
-    from .workers import _run_scrapy_subprocess
 
     job_id = uuid.uuid4().hex[:16]
-    url = f"https://www.vinted.fr/catalog?search_text={q}&order=newest_first"
-    config = {
-        "spider": "vinted",
-        "q": q,
-        "marketplace": marketplace,
-        "max_pages": max_pages,
-        "respect_robots": False,
-        "groq_api_key": getattr(settings, "groq_api_key", ""),
-    }
 
     try:
+        if tool == "scrapy":
+            from .workers import _run_scrapy_subprocess
+
+            url = f"https://www.vinted.fr/catalog?search_text={q}&order=newest_first"
+            config = {
+                "spider": "vinted",
+                "q": q,
+                "marketplace": marketplace,
+                "max_pages": max_pages,
+                "respect_robots": False,
+                "groq_api_key": getattr(settings, "groq_api_key", ""),
+            }
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(_run_scrapy_subprocess, job_id, url, config),
+                    timeout=120.0,
+                )
+            except asyncio.TimeoutError:
+                raise HTTPException(status_code=504, detail="Vinted search timed out after 120s")
+
+            if result.get("_meta", {}).get("blocked", False):
+                return VintedSearchResponse(
+                    query=q,
+                    marketplace=marketplace,
+                    total_items=0,
+                    items=[],
+                    blocked=True,
+                    tool_used="escalation_error",
+                    ts=datetime.now(timezone.utc).isoformat(),
+                )
+
+            items = []
+            for raw in result.get("items", []):
+                price_eur = raw.get("price_eur")
+                price = EbayPrice(value=price_eur, currency="EUR") if price_eur else None
+                items.append(AggregatedItem(
+                    title=raw.get("title"),
+                    price=price,
+                    epid=None,
+                    start_date=None,
+                    end_date=None,
+                    photo_url=raw.get("photo_url"),
+                    link=raw.get("url"),
+                    source="vinted",
+                ))
+
+            return VintedSearchResponse(
+                query=q,
+                marketplace=marketplace,
+                total_items=len(items),
+                items=items,
+                blocked=False,
+                tool_used="scrapy",
+                ts=datetime.now(timezone.utc).isoformat(),
+            )
+
+        # Default path: crawl4ai (renders JS) -> markdown -> LLM extraction.
+        from .workers import _run_crawl4ai_subprocess
+        from tools.extractors.universal_extractor import UniversalExtractor
+
+        url = f"https://www.vinted.fr/catalog?search_text={q}"
+        # Vinted is JS-heavy: wait for listings to render before capturing markdown.
+        config = {"wait_ms": 3000, "page_timeout": 60000}
         try:
             result = await asyncio.wait_for(
-                asyncio.to_thread(_run_scrapy_subprocess, job_id, url, config),
+                asyncio.to_thread(_run_crawl4ai_subprocess, job_id, url, config),
                 timeout=120.0,
             )
         except asyncio.TimeoutError:
             raise HTTPException(status_code=504, detail="Vinted search timed out after 120s")
 
-        raw_items = result.get("items", [])
-        blocked = result.get("_meta", {}).get("blocked", False)
-        tool_used = "scrapy"
-
-        if blocked:
+        markdown = result.get("markdown", "") or ""
+        if "captcha" in markdown.lower():
             return VintedSearchResponse(
                 query=q,
                 marketplace=marketplace,
@@ -1117,8 +1170,14 @@ async def vinted_search(
                 ts=datetime.now(timezone.utc).isoformat(),
             )
 
+        extractor = UniversalExtractor(
+            schema_path=_VINTED_SCHEMA_PATH,
+            groq_api_key=getattr(settings, "groq_api_key", ""),
+        )
         items = []
-        for raw in raw_items:
+        for raw in extractor._llm_extract(markdown):
+            if not extractor._validate(raw):
+                continue
             price_eur = raw.get("price_eur")
             price = EbayPrice(value=price_eur, currency="EUR") if price_eur else None
             items.append(AggregatedItem(
@@ -1138,7 +1197,7 @@ async def vinted_search(
             total_items=len(items),
             items=items,
             blocked=False,
-            tool_used=tool_used,
+            tool_used="crawl4ai",
             ts=datetime.now(timezone.utc).isoformat(),
         )
 
