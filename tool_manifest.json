@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.8.4",
+  "manifest_version": "0.8.5",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -336,6 +336,29 @@
           "type": "string",
           "description": "FlareSolverr API endpoint override. Defaults to FLARESOLVERR_URL env var (http://127.0.0.1:8191/v1).",
           "default": "http://127.0.0.1:8191/v1"
+        }
+      }
+    },
+    "camoufox": {
+      "summary": "Stealth Firefox (Camoufox) runner. Headless via Xvfb virtual display, Windows fingerprint, geoip-aligned locale/timezone, optional Bright Data residential proxy. Fetches a URL and returns rendered HTML + cleaned markdown. Top-tier escalation for WAF/Cloudflare targets (difficulty > 6).",
+      "implemented_in_step": "Stealth S2",
+      "status": "available",
+      "endpoint": "CLI: python -m tools.camoufox_runner.run_camoufox (JSON stdin → JSON stdout)",
+      "params": {
+        "url": {
+          "type": "string",
+          "description": "Target URL to fetch. Required.",
+          "required": true
+        },
+        "wait_ms": {
+          "type": "integer",
+          "description": "Delay after page load before HTML capture, in milliseconds.",
+          "default": 3000
+        },
+        "proxy_config": {
+          "type": "object",
+          "description": "Bright Data residential proxy config, e.g. {\"country\": \"BE\"}. Omit for direct connection.",
+          "default": null
         }
       }
     },
