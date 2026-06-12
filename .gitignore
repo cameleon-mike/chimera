@@ -27,6 +27,7 @@ package-lock.json
 storage/results/*
 storage/screenshots/*
 storage/cookies/*
+storage/stealth_reports/*
 storage/risk_db.sqlite
 storage/risk_db.sqlite-*
 !storage/*/.gitkeep
