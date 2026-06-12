@@ -21,14 +21,13 @@ def make_response(body: str, url: str = "https://www.vinted.fr/catalog?search_te
 
 SAMPLE_HTML = """
 <html><body>
-<div data-testid="item-card">
-  <a href="/items/123456789-wacom-intuos">
-    <span data-testid="item-title">Wacom Intuos Pro M</span>
-    <div data-testid="item-price"><span>85,00 €</span></div>
-    <span data-testid="item-brand">Wacom</span>
-    <span data-testid="item-condition">Très bon état</span>
+<div data-testid="grid-item">
+  <a href="/items/123456789-wacom-intuos" title="Wacom Intuos Pro M">
     <img src="https://images.vinted.net/123.jpg" />
   </a>
+  <div data-testid="product-item-id-123456789--price-text">85,00 €</div>
+  <div data-testid="product-item-id-123456789--description-title">Wacom</div>
+  <div data-testid="product-item-id-123456789--description-subtitle">Très bon état</div>
 </div>
 </body></html>
 """

@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.8.6",
+  "manifest_version": "0.8.7",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {

@@ -367,3 +367,40 @@ class DashboardResponse(BaseModel):
     scoring: dict
     profiles: dict
     proxy: dict
+
+
+# --- Stealth (S4) ----------------------------------------------------
+
+class StealthRunRequest(BaseModel):
+    url: str
+    query: str | None = None
+    source: str = "custom"
+    config: dict[str, Any] | None = None
+    agent_id: str = "manual"
+
+
+class StealthRunResponse(BaseModel):
+    run_id: str
+    status: str
+    security: dict[str, Any]
+    result: dict[str, Any]
+    report: dict[str, Any]
+
+
+class StealthRunSummary(BaseModel):
+    run_id: str
+    created_at: str | None = None
+    url: str
+    query: str | None = None
+    source: str | None = None
+    status: str | None = None
+    http_status: int | None = None
+    items_count: int | None = None
+    duration_ms: int | None = None
+
+
+class StealthStatusResponse(BaseModel):
+    run_id: str
+    status: str
+    phase: str | None = None
+    elapsed_ms: int | None = None

@@ -8,6 +8,7 @@ Step 3.2 will implement /download/{job_id}.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import time
@@ -54,6 +55,10 @@ from .schemas import (
     RunToolRequest,
     RunToolResponse,
     StatusResponse,
+    StealthRunRequest,
+    StealthRunResponse,
+    StealthRunSummary,
+    StealthStatusResponse,
     TwoememainItem,
     TwoememainSearchResponse,
     VintedSearchResponse,
@@ -61,6 +66,7 @@ from .schemas import (
     WatchCountSearchResponse,
 )
 from tools.common.domain_validator import validate_fqdn
+from tools.camoufox_runner.stealth_agent import StealthAgent
 
 logger = setup_logging()
 settings = get_settings()
@@ -68,6 +74,7 @@ _BRIDGE_START_TIME = time.time()
 
 _RISK_DB_PATH = Path(__file__).parent.parent / "storage" / "risk_db.sqlite"
 _VINTED_SCHEMA_PATH = str(Path(__file__).parent.parent / "tools" / "extractors" / "schemas" / "vinted_fr.json")
+_STEALTH_REPORTS_DIR = Path(__file__).parent.parent / "storage" / "stealth_reports"
 
 
 def _init_risk_db() -> None:
@@ -1874,3 +1881,164 @@ if _UI_STATIC_DIR.exists():
 async def serve_ui():
     """Serve the Chimera web UI (public — no auth required)."""
     return FileResponse(str(_UI_DIR / "index.html"))
+
+
+# --- Stealth endpoints (S4) ------------------------------------------
+
+@app.post("/stealth/run", response_model=StealthRunResponse, tags=["stealth"])
+async def stealth_run(
+    body: StealthRunRequest,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> StealthRunResponse:
+    """Run the full stealth pipeline synchronously (Camoufox ~40s; 120s cap)."""
+    agent = StealthAgent(settings, str(_RISK_DB_PATH))
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                agent.run, body.url, body.query, body.source, body.config, body.agent_id
+            ),
+            timeout=120.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="stealth run timed out after 120s")
+    return result
+
+
+@app.get("/stealth/runs", tags=["stealth"])
+async def list_stealth_runs(
+    limit: int = 20,
+    offset: int = 0,
+    source: str | None = None,
+    status: str | None = None,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+):
+    """List stealth runs (newest first) with optional source/status filters."""
+    conn = _get_epid_conn()
+    try:
+        where, params = [], []
+        if source:
+            where.append("source = ?")
+            params.append(source)
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        clause = (" WHERE " + " AND ".join(where)) if where else ""
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM stealth_runs{clause}", params
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT run_id, created_at, url, query, source, status, http_status, "
+            f"items_count, duration_ms FROM stealth_runs{clause} "
+            f"ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+    finally:
+        conn.close()
+    runs = [
+        StealthRunSummary(
+            run_id=r[0], created_at=r[1], url=r[2], query=r[3], source=r[4],
+            status=r[5], http_status=r[6], items_count=r[7], duration_ms=r[8],
+        )
+        for r in rows
+    ]
+    return {"total": total, "runs": runs}
+
+
+@app.get("/stealth/runs/{run_id}", tags=["stealth"])
+async def get_stealth_run(
+    run_id: str,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+):
+    """Full detail of a stealth run, including extracted items."""
+    import json as _json
+
+    conn = _get_epid_conn()
+    try:
+        row = conn.execute(
+            "SELECT run_id, created_at, url, query, source, status, duration_ms, "
+            "security_map, config_used, http_status, html_len, items_count, "
+            "items_json, report_path, error_msg, agent_id, ingest_done "
+            "FROM stealth_runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+
+    def _loads(s, default):
+        try:
+            return _json.loads(s) if s else default
+        except Exception:
+            return default
+
+    return {
+        "run_id": row[0], "created_at": row[1], "url": row[2], "query": row[3],
+        "source": row[4], "status": row[5], "duration_ms": row[6],
+        "security": _loads(row[7], {}), "config": _loads(row[8], {}),
+        "http_status": row[9], "html_len": row[10], "items_count": row[11],
+        "items": _loads(row[12], []), "report_path": row[13], "error_msg": row[14],
+        "agent_id": row[15], "ingest_done": row[16],
+    }
+
+
+def _safe_report_path(run_id: str, filename: str) -> Path:
+    """Resolve a report path, guarding against path traversal via run_id.
+
+    Returns the resolved path only if it stays under _STEALTH_REPORTS_DIR and
+    exists; otherwise raises 404 (never leaks files outside the reports dir).
+    """
+    base = _STEALTH_REPORTS_DIR.resolve()
+    path = (base / run_id / filename).resolve()
+    if not path.is_relative_to(base) or not path.exists():
+        raise HTTPException(status_code=404, detail=f"{filename} not found")
+    return path
+
+
+@app.get("/stealth/runs/{run_id}/report.json", tags=["stealth"])
+async def get_stealth_report_json(
+    run_id: str,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+):
+    path = _safe_report_path(run_id, "report.json")
+    return FileResponse(str(path), media_type="application/json")
+
+
+@app.get("/stealth/runs/{run_id}/report.csv", tags=["stealth"])
+async def get_stealth_report_csv(
+    run_id: str,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+):
+    path = _safe_report_path(run_id, "report.csv")
+    return FileResponse(str(path), media_type="text/csv")
+
+
+@app.get("/stealth/status/{run_id}", response_model=StealthStatusResponse, tags=["stealth"])
+async def get_stealth_status(
+    run_id: str,
+    _token: Annotated[str, Depends(require_bearer)] = ...,
+) -> StealthStatusResponse:
+    from datetime import datetime, timezone
+    conn = _get_epid_conn()
+    try:
+        row = conn.execute(
+            "SELECT status, created_at, duration_ms FROM stealth_runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+    status_val, created_at, duration_ms = row
+    elapsed = duration_ms
+    if elapsed is None:
+        try:
+            elapsed = int(
+                (datetime.now(timezone.utc) - datetime.fromisoformat(created_at)).total_seconds()
+                * 1000
+            )
+        except Exception:
+            elapsed = None
+    return StealthStatusResponse(
+        run_id=run_id, status=status_val, phase=status_val, elapsed_ms=elapsed
+    )
