@@ -159,6 +159,29 @@ def _init_risk_db() -> None:
                 scraped_at      TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_scraped_items_epid ON scraped_items(epid);
+            CREATE TABLE IF NOT EXISTS stealth_runs (
+                run_id          TEXT PRIMARY KEY,
+                created_at      TEXT NOT NULL,
+                url             TEXT NOT NULL,
+                query           TEXT,
+                source          TEXT,
+                status          TEXT DEFAULT 'running',
+                duration_ms     INTEGER,
+                security_map    TEXT,
+                config_used     TEXT,
+                http_status     INTEGER,
+                html_len        INTEGER,
+                items_count     INTEGER DEFAULT 0,
+                items_json      TEXT,
+                raw_markdown    TEXT,
+                report_path     TEXT,
+                error_msg       TEXT,
+                agent_id        TEXT,
+                ingest_done     INTEGER DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_stealth_runs_created ON stealth_runs(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_stealth_runs_source ON stealth_runs(source);
+            CREATE INDEX IF NOT EXISTS idx_stealth_runs_status ON stealth_runs(status);
         """)
         conn.commit()
     finally:
