@@ -35,7 +35,7 @@
 
   <!-- Tabs -->
   <nav class="border-b border-gray-800 px-6 flex gap-6">
-    <template x-for="tab in ['search','deals','database','dashboard','settings']" :key="tab">
+    <template x-for="tab in ['search','deals','database','dashboard','settings','stealth']" :key="tab">
       <button
         class="py-3 text-sm uppercase tracking-widest border-b-2 transition-colors"
         :class="activeTab === tab
@@ -420,7 +420,286 @@
       </div>
     </div>
 
+    <!-- ====== STEALTH TAB ====== -->
+    <div x-show="activeTab === 'stealth'">
+      <!-- LIST VIEW -->
+      <div x-show="stealthView === 'list'">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <h2 class="text-[#d4a253] text-sm uppercase tracking-widest">STEALTH RUNS</h2>
+            <span class="px-2 py-0.5 text-xs bg-gray-800 border border-gray-700 rounded text-gray-400" x-text="stealthTotal"></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              @click="stealthModalOpen=true"
+              class="bg-[#d4a253] text-black font-bold px-4 py-2 hover:bg-amber-400 text-xs uppercase tracking-widest"
+            >[+ NEW RUN]</button>
+            <button
+              @click="loadStealthRuns()"
+              class="text-xs text-gray-500 border border-gray-700 px-3 py-2 hover:border-[#d4a253] hover:text-[#d4a253]"
+            >REFRESH</button>
+          </div>
+        </div>
+
+        <!-- Active run bar -->
+        <div x-show="stealthActiveRun && stealthActiveRun.status === 'running'" class="bg-[#111] border border-gray-800 p-3 mb-4 rounded">
+          <div class="text-sm text-gray-300 mb-2" x-text="'RUN ' + stealthActiveRun.run_id + ' · ' + (stealthActiveRun.source || '?') + ' · phase=' + (stealthActiveRun.phase || '?')"></div>
+          <div class="w-full bg-gray-900 rounded h-2">
+            <div class="bg-[#d4a253] h-2 rounded w-1/2 animate-pulse"></div>
+          </div>
+        </div>
+
+        <!-- History table -->
+        <div x-show="stealthRuns.length > 0" class="overflow-x-auto">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-widest">
+                <th class="text-left py-2 pr-4">ID</th>
+                <th class="text-left py-2 pr-4">Query</th>
+                <th class="text-left py-2 pr-4">Source</th>
+                <th class="text-left py-2 pr-4">Items</th>
+                <th class="text-left py-2 pr-4">Status</th>
+                <th class="text-left py-2 pr-4">Duration</th>
+                <th class="text-left py-2">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="(run, i) in stealthRuns" :key="run.run_id">
+                <tr class="border-b border-gray-900 cursor-pointer hover:bg-[#111]/50" :class="i % 2 === 0 ? 'bg-[#0d0d0d]' : 'bg-[#111]'" @click="openStealthDetail(run.run_id)">
+                  <td class="py-2 pr-4 text-[#d4a253] text-xs font-mono" x-text="run.run_id"></td>
+                  <td class="py-2 pr-4 text-gray-300 truncate max-w-xs" x-text="run.query || '—'"></td>
+                  <td class="py-2 pr-4 text-gray-400 text-xs" x-text="run.source || '—'"></td>
+                  <td class="py-2 pr-4 text-gray-300" x-text="run.items_count != null ? run.items_count : '—'"></td>
+                  <td class="py-2 pr-4">
+                    <span class="text-xs font-bold" :class="run.status === 'success' ? 'text-green-400' : run.status === 'error' ? 'text-red-400' : 'text-amber-400'">
+                      <span x-show="run.status === 'success'">✅</span>
+                      <span x-show="run.status === 'error'">❌</span>
+                      <span x-show="run.status === 'running'">🔄</span>
+                      <span x-text="run.status"></span>
+                    </span>
+                  </td>
+                  <td class="py-2 pr-4 text-gray-400 text-xs" x-text="stealthDuration(run.duration_ms)"></td>
+                  <td class="py-2 text-gray-500 text-xs" x-text="run.created_at ? run.created_at.slice(0,19).replace('T',' ') : '—'"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Empty state -->
+        <div x-show="!stealthLoading && stealthRuns.length === 0" class="text-gray-600 text-sm py-4">
+          No stealth runs yet.
+        </div>
+      </div>
+
+      <!-- DETAIL VIEW -->
+      <div x-show="stealthView === 'detail' && stealthDetail">
+        <div class="mb-4">
+          <button @click="stealthView='list'" class="text-xs text-gray-500 hover:text-gray-300">← RETOUR</button>
+        </div>
+
+        <div class="mb-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-[#d4a253] text-sm uppercase tracking-widest" x-text="stealthDetail.run_id"></h2>
+              <p class="text-xs text-gray-500 mt-1" x-text="stealthDetail.created_at ? stealthDetail.created_at.slice(0,19).replace('T',' ') : '—'"></p>
+            </div>
+            <p class="text-xs text-gray-400" x-text="stealthDuration(stealthDetail.duration_ms)"></p>
+          </div>
+        </div>
+
+        <!-- Security & Results grid -->
+        <div class="grid md:grid-cols-2 gap-4 mb-4">
+          <!-- Security -->
+          <div class="bg-[#111] border border-gray-800 p-4 rounded">
+            <p class="text-xs text-gray-500 uppercase tracking-widest mb-3">Sécurité</p>
+            <div class="space-y-1 text-sm">
+              <div class="flex justify-between">
+                <span class="text-gray-500">WAF</span>
+                <span class="text-gray-100" x-text="stealthDetail.security && stealthDetail.security.waf ? stealthDetail.security.waf : '—'"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">CAPTCHA</span>
+                <span class="text-gray-100" x-text="stealthDetail.security && stealthDetail.security.captcha ? 'YES' : 'NO'"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">Difficulty</span>
+                <span class="text-gray-100" x-text="stealthDetail.security && stealthDetail.security.difficulty != null ? stealthDetail.security.difficulty : '—'"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">Proxy</span>
+                <span class="text-gray-100" x-text="stealthDetail.config && stealthDetail.config.proxy_country ? stealthDetail.config.proxy_country : '—'"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">Tool</span>
+                <span class="text-gray-100">camoufox</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Results -->
+          <div class="bg-[#111] border border-gray-800 p-4 rounded">
+            <p class="text-xs text-gray-500 uppercase tracking-widest mb-3">Résultats</p>
+            <div class="space-y-1 text-sm">
+              <div class="flex justify-between">
+                <span class="text-gray-500">Items</span>
+                <span class="text-gray-100" x-text="stealthDetail.items_count"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">BUY</span>
+                <span class="text-green-400" x-text="(stealthDetail.items || []).filter(it => it.decision === 'BUY').length"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">OFFER</span>
+                <span class="text-amber-400" x-text="(stealthDetail.items || []).filter(it => it.decision === 'OFFER').length"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">SKIP</span>
+                <span class="text-gray-500" x-text="(stealthDetail.items || []).filter(it => it.decision === 'SKIP').length"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">ePID coverage</span>
+                <span class="text-gray-100" x-text="(stealthDetail.items || []).filter(it => it.epid).length + '/' + stealthDetail.items_count"></span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">Meilleur deal</span>
+                <span class="text-gray-100 truncate max-w-xs" x-text="(() => { const buys = (stealthDetail.items || []).filter(it => it.decision === 'BUY'); if (!buys.length) return '—'; const best = buys.reduce((a,b) => (a.confidence||0) > (b.confidence||0) ? a : b); return best.title || '—'; })()"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Items table -->
+        <div x-show="stealthDetail.items_count > 0" class="overflow-x-auto mb-4">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-widest">
+                <th class="text-left py-2 pr-4">Title</th>
+                <th class="text-left py-2 pr-4">Price</th>
+                <th class="text-left py-2 pr-4">Decision</th>
+                <th class="text-left py-2 pr-4">Confidence</th>
+                <th class="text-left py-2">Link</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="(item, i) in (stealthDetail.items || []).slice(0,20)" :key="i">
+                <tr class="border-b border-gray-900" :class="i % 2 === 0 ? 'bg-[#0d0d0d]' : 'bg-[#111]'">
+                  <td class="py-2 pr-4 max-w-xs truncate" x-text="item.title || '—'"></td>
+                  <td class="py-2 pr-4 text-[#d4a253]" x-text="item.price_eur ? '€' + item.price_eur : '—'"></td>
+                  <td class="py-2 pr-4">
+                    <span class="text-xs border px-1.5 py-0.5 rounded font-bold uppercase" :class="decisionColor(item.decision)" x-text="item.decision || '—'"></span>
+                  </td>
+                  <td class="py-2 pr-4 text-gray-300" x-text="item.confidence != null ? Math.round(item.confidence * 100) + '%' : '—'"></td>
+                  <td class="py-2">
+                    <a x-show="item.url" :href="item.url" target="_blank" rel="noopener noreferrer" class="text-xs text-[#d4a253] hover:underline">VIEW</a>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Download buttons -->
+        <div class="flex gap-2">
+          <button @click="downloadReport(stealthDetail.run_id, 'json')" class="text-xs text-gray-500 border border-gray-700 px-3 py-2 hover:border-[#d4a253] hover:text-[#d4a253]">⬇ JSON</button>
+          <button @click="downloadReport(stealthDetail.run_id, 'csv')" class="text-xs text-gray-500 border border-gray-700 px-3 py-2 hover:border-[#d4a253] hover:text-[#d4a253]">⬇ CSV</button>
+        </div>
+      </div>
+    </div>
+
   </main>
+
+  <!-- STEALTH MODAL -->
+  <div x-show="stealthModalOpen" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="stealthModalOpen=false">
+    <div class="bg-[#111] border border-gray-800 p-6 rounded max-w-md w-full mx-4">
+      <h3 class="text-[#d4a253] text-sm uppercase tracking-widest mb-4">New Stealth Run</h3>
+
+      <div class="space-y-4 mb-6">
+        <!-- URL -->
+        <div>
+          <label class="text-xs text-gray-500 uppercase tracking-widest block mb-1">URL <span class="text-red-400">*</span></label>
+          <input
+            type="text"
+            placeholder="https://..."
+            x-model="stealthForm.url"
+            class="bg-[#0d0d0d] border border-gray-700 text-gray-100 px-3 py-2 focus:border-[#d4a253] focus:outline-none w-full"
+          />
+        </div>
+
+        <!-- Query -->
+        <div>
+          <label class="text-xs text-gray-500 uppercase tracking-widest block mb-1">Query</label>
+          <input
+            type="text"
+            placeholder="search term (optional)"
+            x-model="stealthForm.query"
+            class="bg-[#0d0d0d] border border-gray-700 text-gray-100 px-3 py-2 focus:border-[#d4a253] focus:outline-none w-full"
+          />
+        </div>
+
+        <!-- Source -->
+        <div>
+          <label class="text-xs text-gray-500 uppercase tracking-widest block mb-1">Source</label>
+          <select
+            x-model="stealthForm.source"
+            class="bg-[#0d0d0d] border border-gray-700 text-gray-100 px-3 py-2 focus:border-[#d4a253] focus:outline-none w-full"
+          >
+            <option value="vinted">vinted</option>
+            <option value="ebay">ebay</option>
+            <option value="2ememain">2ememain</option>
+            <option value="custom">custom</option>
+          </select>
+        </div>
+
+        <!-- Proxy Country -->
+        <div>
+          <label class="text-xs text-gray-500 uppercase tracking-widest block mb-1">Proxy Country</label>
+          <select
+            x-model="stealthForm.proxy_country"
+            class="bg-[#0d0d0d] border border-gray-700 text-gray-100 px-3 py-2 focus:border-[#d4a253] focus:outline-none w-full"
+          >
+            <option value="BE">BE</option>
+            <option value="FR">FR</option>
+            <option value="DE">DE</option>
+            <option value="GB">GB</option>
+            <option value="NL">NL</option>
+          </select>
+        </div>
+
+        <!-- Ingest toggle -->
+        <div class="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="stealthIngest"
+            x-model="stealthForm.ingest"
+            class="w-4 h-4"
+          />
+          <label for="stealthIngest" class="text-xs text-gray-400">Ingest → epid_stats</label>
+        </div>
+      </div>
+
+      <!-- Buttons -->
+      <div class="flex gap-2">
+        <button
+          @click="launchStealthRun()"
+          :disabled="stealthLaunching || !stealthForm.url"
+          class="flex-1 bg-[#d4a253] text-black font-bold px-4 py-2 hover:bg-amber-400 disabled:opacity-50 text-xs uppercase tracking-widest flex items-center justify-center gap-2"
+        >
+          <span x-show="!stealthLaunching">[LAUNCH]</span>
+          <span x-show="stealthLaunching" class="flex items-center gap-2">
+            <span class="spinner"></span>RUNNING… (~40s)
+          </span>
+        </button>
+        <button
+          @click="stealthModalOpen=false"
+          class="flex-1 text-xs text-gray-500 border border-gray-700 px-4 py-2 hover:border-[#d4a253] hover:text-[#d4a253] uppercase tracking-widest"
+        >[CANCEL]</button>
+      </div>
+
+      <!-- Error message -->
+      <div x-show="stealthError" class="bg-red-900/30 border border-red-800 p-2 mt-4 text-red-400 text-xs" x-text="stealthError"></div>
+    </div>
+  </div>
 
   <script>
     function chimera() {
@@ -454,6 +733,19 @@
 
         // Settings tab
         settingsMsg: '',
+
+        // Stealth tab
+        stealthView: 'list',
+        stealthRuns: [],
+        stealthTotal: 0,
+        stealthLoading: false,
+        stealthActiveRun: null,
+        stealthPollTimer: null,
+        stealthModalOpen: false,
+        stealthLaunching: false,
+        stealthDetail: null,
+        stealthError: '',
+        stealthForm: { url: '', query: '', source: 'vinted', proxy_country: 'BE', ingest: false },
 
         init() {
           // restore from localStorage
@@ -549,6 +841,9 @@
           } else {
             if (this.dashTimer) { clearInterval(this.dashTimer); this.dashTimer = null; }
           }
+          if (tab === 'stealth') {
+            this.loadStealthRuns();
+          }
         },
 
         decisionColor(decision) {
@@ -561,6 +856,101 @@
           if (!s) return '0s';
           const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
           return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`;
+        },
+
+        async loadStealthRuns() {
+          this.stealthLoading = true;
+          try {
+            const r = await fetch(`${this.apiUrl}/stealth/runs?limit=50`, { headers: this.authHeaders });
+            const body = await r.json();
+            this.stealthRuns = body.runs || [];
+            this.stealthTotal = body.total || 0;
+          } catch(e) { this.stealthRuns = []; this.stealthTotal = 0; }
+          finally { this.stealthLoading = false; }
+        },
+
+        async openStealthDetail(run_id) {
+          try {
+            const r = await fetch(`${this.apiUrl}/stealth/runs/${run_id}`, { headers: this.authHeaders });
+            this.stealthDetail = await r.json();
+            this.stealthView = 'detail';
+          } catch(e) { console.error(e); }
+        },
+
+        async launchStealthRun() {
+          if (!this.stealthForm.url) { this.stealthError = 'URL is required'; return; }
+          this.stealthLaunching = true;
+          this.stealthError = '';
+          try {
+            const body = {
+              url: this.stealthForm.url,
+              query: this.stealthForm.query || undefined,
+              source: this.stealthForm.source,
+              config: {
+                proxy_country: this.stealthForm.proxy_country,
+                ingest: this.stealthForm.ingest,
+              },
+            };
+            const r = await fetch(`${this.apiUrl}/stealth/run`, {
+              method: 'POST',
+              headers: this.authHeaders,
+              body: JSON.stringify(body),
+            });
+            const result = await r.json();
+            if (r.ok) {
+              this.stealthActiveRun = { run_id: result.run_id, status: 'running', source: this.stealthForm.source, phase: 'init' };
+              this.startStealthPolling(result.run_id);
+              this.stealthModalOpen = false;
+              this.stealthForm = { url: '', query: '', source: 'vinted', proxy_country: 'BE', ingest: false };
+              await this.loadStealthRuns();
+              await this.openStealthDetail(result.run_id);
+            } else {
+              this.stealthError = result.error || 'Failed to launch run';
+            }
+          } catch(e) { this.stealthError = e.message; }
+          finally { this.stealthLaunching = false; }
+        },
+
+        startStealthPolling(run_id) {
+          this.stopStealthPolling();
+          this.stealthPollTimer = setInterval(async () => {
+            try {
+              const r = await fetch(`${this.apiUrl}/stealth/status/${run_id}`, { headers: this.authHeaders });
+              const body = await r.json();
+              this.stealthActiveRun = body;
+              if (body.status !== 'running') {
+                this.stopStealthPolling();
+              }
+            } catch(e) { }
+          }, 2000);
+        },
+
+        stopStealthPolling() {
+          if (this.stealthPollTimer) {
+            clearInterval(this.stealthPollTimer);
+            this.stealthPollTimer = null;
+          }
+        },
+
+        async downloadReport(run_id, kind) {
+          try {
+            const endpoint = kind === 'json' ? 'report.json' : 'report.csv';
+            const r = await fetch(`${this.apiUrl}/stealth/runs/${run_id}/${endpoint}`, { headers: this.authHeaders });
+            const blob = await r.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${run_id}.${kind === 'json' ? 'json' : 'csv'}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          } catch(e) { console.error(e); }
+        },
+
+        stealthDuration(ms) {
+          if (ms == null) return '—';
+          return (ms / 1000).toFixed(1) + 's';
         },
       }
     }
