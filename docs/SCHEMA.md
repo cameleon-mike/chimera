@@ -1,131 +1,158 @@
-# Chimera — Database Schema Reference
+# Chimera Data Schema (contract v1.0)
 
-SQLite database : `storage/risk_db.sqlite`
+### Data Shapes (contrat v1.0)
 
-Migration strategy : all tables use `CREATE TABLE IF NOT EXISTS` — idempotent on restart.
+AggregatedItem
+```
+title str
+price {value float, currency str}
+source str
+epid str?
+start_date str?
+end_date str?
+photo_url str?
+link str
+```
 
----
+EpidStats
+```
+epid str
+brand str?
+model str?
+total_items int
+currency str
+median_price float
+q1_price float
+q2_price float
+q3_price float
+q4_price float
+avg_sell_days float?
+sell_days_sample int
+last_updated str
+```
 
-## Tables
+FlipScoreResponse
+```
+decision BUY|OFFER|SKIP
+confidence float (0-1)
+price_ratio float
+margin_eur float
+margin_pct float
+velocity_flag fast|normal|slow|unknown
+reasoning str
+```
 
-### `domain_probe`
+NavigatorRunResponse
+```
+query str
+pipeline_ms int
+probe_risk float
+total_scraped int
+total_scored int
+deals list
+summary str
+```
 
-Stores static probe results from `/probe/{domain}`.
+DashboardResponse
+```
+bridge {version, uptime_seconds, status}
+jobs {queued, active, failed_last_hour}
+scraping {total_items, epids_tracked, last_scrape}
+scoring {total_scored, deals_buy, deals_offer, deals_skip}
+profiles {creating, warming, ready, senior, recycle}
+proxy {residential_configured bool}
+```
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER PK | Auto-increment |
-| domain | TEXT | FQDN probed |
-| probed_at | TEXT | ISO 8601 UTC timestamp |
-| risk_score | REAL | 0.0–1.0 static risk score |
-| vendors_json | TEXT | JSON array of detected vendors |
-| indicators_json | TEXT | JSON object {waf, captcha, botdet} |
-| features_json | TEXT | JSON object of security headers |
-| tls_version | TEXT | TLS version string |
-| tls_cipher | TEXT | Cipher suite name |
-| http_status | INTEGER | HTTP response code |
-| recommendation_json | TEXT | JSON recommendation {tool, proxy_tier, fingerprint} |
+StealthRunResponse
+```
+run_id str
+status success|error|captcha_blocked
+security {waf, captcha, difficulty, proxy_recommendation}
+result {http_status, html_len, items_count, duration_ms}
+report {json_url, csv_url}
+```
 
-Indexes: `domain`, `probed_at`
+### SQLite Tables
 
-Cache TTL: 24h (probes older than 24h trigger a fresh probe unless `force=true`)
+risk_events
+```
+job_id
+url
+domain
+risk_score
+vendors_detected
+ts
+```
 
----
+profiles
+```
+profile_id
+geo_id
+proxy_country
+ua_profile_id
+status (creating/warming/ready/senior/recycle)
+age_days
+created_at
+last_active
+warmed
+cookies_count
+```
 
-### `proxy_use`
+epid_stats
+```
+epid
+brand
+model
+total_items
+currency
+median_price
+q1_price
+q2_price
+q3_price
+q4_price
+avg_sell_days
+sell_days_sample
+last_updated
+```
 
-Tracks proxy usage per host for rotation health.
+scraped_items
+```
+id
+epid
+title
+price_value
+price_currency
+start_date
+end_date
+source
+url
+scraped_at
+```
 
-| Column | Type | Description |
-|--------|------|-------------|
-| proxy_url | TEXT | Proxy endpoint |
-| host | TEXT | Target hostname |
-| ts | INTEGER | Unix timestamp |
-| status | INTEGER | HTTP status returned |
+stealth_runs
+```
+run_id
+created_at
+url
+query
+source
+status
+duration_ms
+security_map
+config_used
+http_status
+html_len
+items_count
+items_json
+raw_markdown
+report_path
+error_msg
+agent_id
+ingest_done
+```
 
-Index: `(proxy_url, host, ts)`
-
----
-
-### `risk_events`
-
-Runtime risk events — one row per scraped response analysed by `RiskMiddleware`.
-Added in Step 2.3.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER PK | Auto-increment |
-| job_id | TEXT | Scrapy job ID (16-hex) — nullable for standalone use |
-| domain | TEXT NOT NULL | Extracted from URL |
-| url | TEXT NOT NULL | Full request URL |
-| ts | TEXT NOT NULL | ISO 8601 UTC timestamp |
-| http_status | INTEGER | HTTP status code |
-| risk_score | REAL NOT NULL | 0.0–1.0 runtime risk score |
-| vendors_json | TEXT | JSON array of detected WAF/bot vendors |
-| markers_json | TEXT | JSON object {waf, captcha, botdet, status} hit counts |
-| response_size | INTEGER | Response body size in bytes |
-| duration_ms | INTEGER | Request duration in milliseconds |
-
-Indexes: `domain`, `ts`, `job_id`
-
-Queried by: `GET /risk/{domain}?hours=N` (aggregation per domain)
-
----
-
-## Escalation mapping (Step 2.3+)
-
-Risk scores from `risk_events` drive escalation decisions:
-
-| avg_risk | Suggested action |
-|----------|-----------------|
-| < 0.2 | scrapy + datacenter proxy |
-| 0.2–0.5 | scrapy + residential proxy |
-| 0.5–0.8 | crawl4ai + residential |
-| ≥ 0.8 | screenshot + residential |
-
-### `epid_stats`
-
-Aggregated ePID statistics: price quartiles and avg sell time. Populated by `POST /epid/ingest`.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| epid | TEXT PK | eBay Product Identifier |
-| brand | TEXT | First word extracted from title |
-| model | TEXT | Words 2-3 extracted from title |
-| total_items | INTEGER | Number of ingested items for this ePID |
-| currency | TEXT | Currency (EUR, GBP, etc.) |
-| median_price | REAL | Median price across items |
-| q1_price | REAL | First quartile price |
-| q2_price | REAL | Second quartile (= median) |
-| q3_price | REAL | Third quartile price |
-| q4_price | REAL | Maximum price |
-| avg_sell_days | REAL | Mean selling time in days (null if no sold items) |
-| min_sell_days | REAL | Minimum selling time in days |
-| max_sell_days | REAL | Maximum selling time in days |
-| sell_days_sample | INTEGER | Number of items used to compute avg_sell_days |
-| last_updated | TEXT | ISO 8601 UTC timestamp of last recompute |
-
-Upsert strategy: `INSERT OR REPLACE` — fully recomputed on each ingest batch.
-
----
-
-### `scraped_items`
-
-Raw item store — one row per scraped listing (deduplicated by URL).
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER PK | Auto-increment |
-| epid | TEXT | eBay Product Identifier (nullable for non-eBay sources) |
-| title | TEXT | Listing title |
-| price_value | REAL | Numeric price |
-| price_currency | TEXT | Currency code |
-| start_date | TEXT | Listing creation date (ISO 8601) |
-| end_date | TEXT | Sold/ended date (ISO 8601) — null for active listings |
-| source | TEXT | Data source: "ebay", "2ememain", "watchcount" |
-| url | TEXT UNIQUE | Canonical URL — deduplication key |
-| scraped_at | TEXT | Ingest timestamp (ISO 8601 UTC) |
-
-Index: `epid` (for per-ePID queries in `recompute_all_stats`)
-
-Inserted by: `POST /epid/ingest` and `GET /ebay/search?ingest=true`
+### Nullability Rules
+- Jamais un champ absent du JSON — toujours `null` si inconnu.
+- avg_sell_days null jusqu'en prod avec WatchCount résidentiel.
+- epid null sur 84% des items eBay.fr.
+- end_date toujours null depuis eBay Browse API.
