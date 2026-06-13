@@ -1,6 +1,6 @@
 {
   "$schema": "./tool_manifest.schema.json",
-  "manifest_version": "0.9.0",
+  "manifest_version": "0.9.1",
   "name": "chimera",
   "description": "Hybrid production scraper. Cameleon pilots; chimera executes.",
   "discovery": {
@@ -646,6 +646,7 @@
     "GET /aggregate/search": "Multi-source aggregator — parallel eBay + 2ememain, fuzzy dedup, unified CSV with source column. Auth required.",
     "GET  /epid/stats/{epid}": "Full ePID stats sheet: price quartiles + avg_sell_days. 404 if unknown.",
     "POST /epid/ingest": "Ingest scraped items into scraped_items table; recompute ePID stats. Body: {items, source}.",
-    "GET  /epid/search": "Search ePID stats by brand or model (LIKE). Returns list of stats sheets."
+    "GET  /epid/search": "Search ePID stats by brand or model (LIKE). Returns list of stats sheets.",
+    "GET  /streams": "Server-only DataStreams view for Cameleon/Shovel. Per-source scraping health (ebay, vinted, 2ememain, stealth): counts, rate/hour, last-item age, status (live|idle|stalled|error), preview items. Auth required."
   }
 }

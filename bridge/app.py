@@ -59,6 +59,8 @@ from .schemas import (
     StealthRunResponse,
     StealthRunSummary,
     StealthStatusResponse,
+    StreamCard,
+    StreamPreviewItem,
     TwoememainItem,
     TwoememainSearchResponse,
     VintedSearchResponse,
@@ -1865,6 +1867,137 @@ async def dashboard(
             "last_test": None,
         },
     }
+
+
+_STREAM_SOURCES = [
+    {"id": "chimera-ebay-fr", "name": "eBay France", "source": "ebay"},
+    {"id": "chimera-vinted-fr", "name": "Vinted France", "source": "vinted"},
+    {"id": "chimera-2ememain-be", "name": "2ememain Belgique", "source": "2ememain"},
+]
+
+
+@app.get("/streams", response_model=list[StreamCard], tags=["meta"])
+async def streams(
+    _token: Annotated[str, Depends(require_bearer)],
+):
+    """Server-only DataStreams view (Cameleon → Shovel). Health of each scraping source.
+
+    Never called by the PWA. Reads scraped_items (collected sources) and
+    stealth_runs (stealth source). Best-effort per source — a missing/empty
+    source yields status='stalled', not an error.
+    """
+    cards: list[StreamCard] = []
+    conn = sqlite3.connect(str(_RISK_DB_PATH))
+    try:
+        conn.row_factory = sqlite3.Row
+        hours_since_midnight = conn.execute(
+            "SELECT (strftime('%s','now') - strftime('%s', date('now','start of day'))) / 3600.0"
+        ).fetchone()[0]
+
+        for spec in _STREAM_SOURCES:
+            src = spec["source"]
+            total_count = conn.execute(
+                "SELECT COUNT(*) FROM scraped_items WHERE source = ?", (src,)
+            ).fetchone()[0] or 0
+            today_count = conn.execute(
+                "SELECT COUNT(*) FROM scraped_items WHERE source = ? "
+                "AND scraped_at >= date('now','start of day')",
+                (src,),
+            ).fetchone()[0] or 0
+            ago_raw = conn.execute(
+                "SELECT strftime('%s','now') - strftime('%s', MAX(scraped_at)) "
+                "FROM scraped_items WHERE source = ?",
+                (src,),
+            ).fetchone()[0]
+            last_item_ago_s = int(ago_raw) if ago_raw is not None else None
+            preview_rows = conn.execute(
+                "SELECT title, price_value AS price, source FROM scraped_items "
+                "WHERE source = ? ORDER BY scraped_at DESC LIMIT 3",
+                (src,),
+            ).fetchall()
+            preview_items = [
+                StreamPreviewItem(
+                    title=r["title"] or "", price=r["price"], source=r["source"] or src
+                )
+                for r in preview_rows
+            ]
+            rate_per_hour = round(today_count / max(1.0, hours_since_midnight), 1)
+
+            if total_count == 0 or last_item_ago_s is None:
+                status = "stalled"
+            elif last_item_ago_s < 3600:
+                status = "live"
+            elif last_item_ago_s < 86400:
+                status = "idle"
+            else:
+                status = "stalled"
+
+            cards.append(
+                StreamCard(
+                    id=spec["id"],
+                    name=spec["name"],
+                    source=src,
+                    type="collected",
+                    status=status,
+                    reason=None,
+                    total_count=total_count,
+                    today_count=today_count,
+                    rate_per_hour=rate_per_hour,
+                    last_item_ago_s=last_item_ago_s if last_item_ago_s is not None else 0,
+                    preview_items=preview_items,
+                )
+            )
+
+        # Stealth source (from stealth_runs)
+        total_count = conn.execute("SELECT COUNT(*) FROM stealth_runs").fetchone()[0] or 0
+        today_count = conn.execute(
+            "SELECT COUNT(*) FROM stealth_runs "
+            "WHERE created_at >= date('now','start of day')"
+        ).fetchone()[0] or 0
+        last_run = conn.execute(
+            "SELECT status, error_msg, created_at FROM stealth_runs "
+            "ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        reason = None
+        if last_run is None:
+            status = "stalled"
+            last_item_ago_s = 0
+        else:
+            ago_raw = conn.execute(
+                "SELECT strftime('%s','now') - strftime('%s', ?)",
+                (last_run["created_at"],),
+            ).fetchone()[0]
+            last_item_ago_s = int(ago_raw) if ago_raw is not None else 0
+            if last_run["status"] == "error":
+                status = "error"
+                reason = last_run["error_msg"]
+            elif last_item_ago_s < 3600:
+                status = "live"
+            elif last_item_ago_s < 86400:
+                status = "idle"
+            else:
+                status = "stalled"
+        rate_per_hour = round(today_count / max(1.0, hours_since_midnight), 1)
+
+        cards.append(
+            StreamCard(
+                id="chimera-stealth",
+                name="Stealth Engine",
+                source="stealth",
+                type="stealth",
+                status=status,
+                reason=reason,
+                total_count=total_count,
+                today_count=today_count,
+                rate_per_hour=rate_per_hour,
+                last_item_ago_s=last_item_ago_s,
+                preview_items=[],
+            )
+        )
+    finally:
+        conn.close()
+
+    return cards
 
 
 # --- Static UI -----------------------------------------------------------

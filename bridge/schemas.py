@@ -404,3 +404,25 @@ class StealthStatusResponse(BaseModel):
     status: str
     phase: str | None = None
     elapsed_ms: int | None = None
+
+
+# --- Streams (DataStreams / Cameleon, 0.9.1) -------------------------
+
+class StreamPreviewItem(BaseModel):
+    title: str
+    price: float | None = None
+    source: str
+
+
+class StreamCard(BaseModel):
+    id: str
+    name: str
+    source: str
+    type: str
+    status: str
+    reason: str | None = None
+    total_count: int
+    today_count: int
+    rate_per_hour: float
+    last_item_ago_s: int
+    preview_items: list[StreamPreviewItem]
